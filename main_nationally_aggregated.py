@@ -40,9 +40,6 @@ for year in years:
     # Load network
     network = load_network(config)
 
-    # Aggregate to national level
-    network = aggregate_to_national_level(network)
-
     # Load and apply monthly data
     monthly_df = load_monthly_data(config)
     apply_monthly_data_to_network(network, config, monthly_df)
@@ -50,6 +47,9 @@ for year in years:
     # Load and apply snapshot data
     snapshot_df = load_snapshot_data(config)
     apply_snapshot_data_to_network(network, config, snapshot_df)
+
+    # Aggregate to national level (after applying regional data)
+    network = aggregate_to_national_level(network)
 
     # Store the network
     networks[year] = network

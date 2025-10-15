@@ -36,15 +36,9 @@ monthly_data:
 snapshot_data:
   file_path: "data/add/snapshot_t.csv"
 
-# Regional aggregation settings
-regional_aggregation:
+# Regional settings
+regional_settings:
   national_region: "KR"
-  # Aggregation methods for monthly_t data
-  monthly_t:
-    generators.marginal_cost: mean
-  # Aggregation methods for snapshot_t data
-  snapshot_t:
-    generators.p_max_pu: mean
 
 # Base data file path
 Base_year:

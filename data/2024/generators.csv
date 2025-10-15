@@ -1,4 +1,4 @@
-﻿name,bus,type,build_year,p_nom,carrier,address,region,capital_cost,ramp_limit_start_up,ramp_limit_shut_down,min_up_time,min_down_time,p_min_pu,company,membership,market,control
+﻿name,bus,type,build_year,p_nom,carrier,address,province,capital_cost,ramp_limit_start_up,ramp_limit_shut_down,min_up_time,min_down_time,p_min_pu,company,membership,market,control
 강릉안인#1,KR,기력,2022,1040,bituminous,강원 강릉시 강동면,강원특별자치도,,0.05,0.05,5,5,0.4,강릉에코파워(주),정회원,시장,중앙
 강릉안인#2,KR,기력,2022,1040,bituminous,강원 강릉시 강동면,강원특별자치도,,0.05,0.05,5,5,0.4,강릉에코파워(주),정회원,시장,중앙
 남제주#1,KR,신재생,2006,100,bio,제주 서귀포시 안덕면,제주특별자치도,,0.2,0.2,1,1,0.4,남부발전㈜,정회원,시장,중앙

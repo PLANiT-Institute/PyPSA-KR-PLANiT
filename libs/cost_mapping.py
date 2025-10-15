@@ -7,7 +7,8 @@ import pandas as pd
 def apply_monthly_data_to_network(network, config, monthly_df):
     """
     Apply monthly data to network components dynamically.
-    Uses snapshot, carrier, components, components_t, attribute, value, and status columns from monthly_df.
+    Matches generators by carrier and region/province/name based on aggregation level.
+    Uses snapshot, carrier, components, components_t, attribute, value, status, region, aggregation columns.
 
     Parameters:
     -----------
@@ -16,9 +17,10 @@ def apply_monthly_data_to_network(network, config, monthly_df):
     config : dict
         Configuration dictionary
     monthly_df : pd.DataFrame
-        Monthly data with columns: snapshot, carrier, components, components_t, attribute, value, status
+        Monthly data with columns: snapshot, carrier, components, components_t, attribute, value, status, region, aggregation
     """
     carrier_mapping = config['carrier_mapping']
+    national_region = config['regional_settings']['national_region']
 
     # Filter only active (TRUE) status records
     active_df = monthly_df[monthly_df['status'] == True].copy()
@@ -40,8 +42,8 @@ def apply_monthly_data_to_network(network, config, monthly_df):
     # Add year-month to monthly data
     active_df['year_month'] = active_df['snapshot'].dt.to_period('M')
 
-    # Group by components, components_t, and attribute
-    for (component_name, component_t_name, attribute), group in active_df.groupby(['components', 'components_t', 'attribute']):
+    # Group by components, components_t, attribute, and aggregation
+    for (component_name, component_t_name, attribute, aggregation_level), group in active_df.groupby(['components', 'components_t', 'attribute', 'aggregation']):
 
         # Get the component objects directly from network
         component = getattr(network, component_name, None)
@@ -57,18 +59,40 @@ def apply_monthly_data_to_network(network, config, monthly_df):
         # Process each item in the component
         for item_idx in component.index:
             item_carrier = component.loc[item_idx, 'carrier']
-            monthly_carrier = carrier_mapping.get(item_carrier)
+            item_province = component.loc[item_idx, 'province'] if 'province' in component.columns else None
+            mapped_carrier = carrier_mapping.get(item_carrier)
 
-            if monthly_carrier:
-                carrier_data = group[group['carrier'] == monthly_carrier]
+            if mapped_carrier:
+                carrier_data = group[group['carrier'] == mapped_carrier].copy()
+
                 if not carrier_data.empty:
-                    merged = snapshot_months.merge(
-                        carrier_data[['year_month', 'value']],
-                        on='year_month',
-                        how='left'
-                    )
-                    merged['value'] = merged['value'].ffill()
-                    columns_data[item_idx] = merged['value'].values
+                    region_data = pd.DataFrame()
+
+                    if aggregation_level == 'national':
+                        # Use national-level data
+                        region_data = carrier_data[carrier_data['region'] == national_region]
+                    elif aggregation_level == 'province':
+                        # Match by province
+                        if item_province:
+                            region_data = carrier_data[carrier_data['region'] == item_province]
+                    elif aggregation_level == 'generator':
+                        # Match by generator name
+                        if 'name' in carrier_data.columns:
+                            generator_data = carrier_data[carrier_data['name'] == item_idx]
+                            if not generator_data.empty:
+                                region_data = generator_data
+                            elif item_province:
+                                # Fallback to province
+                                region_data = carrier_data[carrier_data['region'] == item_province]
+
+                    if not region_data.empty:
+                        merged = snapshot_months.merge(
+                            region_data[['year_month', 'value']],
+                            on='year_month',
+                            how='left'
+                        )
+                        merged['value'] = merged['value'].ffill()
+                        columns_data[item_idx] = merged['value'].values
 
         # Create the DataFrame all at once
         if columns_data:
@@ -78,22 +102,21 @@ def apply_monthly_data_to_network(network, config, monthly_df):
 
 def apply_snapshot_data_to_network(network, config, snapshot_df):
     """
-    Apply snapshot-level data to network components with regional aggregation.
-    Uses snapshot, carrier, region, aggregation, components, components_t, attribute, value, and status columns.
+    Apply snapshot-level data to network components.
+    Matches generators by carrier and region/province/name based on aggregation level.
+    Uses snapshot, carrier, region, aggregation, components, components_t, attribute, value, status columns.
 
     Parameters:
     -----------
     network : pypsa.Network
         PyPSA network object
     config : dict
-        Configuration dictionary with regional_aggregation settings
+        Configuration dictionary
     snapshot_df : pd.DataFrame
         Snapshot data with columns: snapshot, carrier, region, aggregation, components, components_t, attribute, value, status
     """
     carrier_mapping = config['carrier_mapping']
-    regional_agg_config = config['regional_aggregation']
-    national_region = regional_agg_config['national_region']
-    agg_methods = regional_agg_config['snapshot_t']
+    national_region = config['regional_settings']['national_region']
 
     # Filter only active (TRUE) status records
     active_df = snapshot_df[snapshot_df['status'] == True].copy()
@@ -116,47 +139,44 @@ def apply_snapshot_data_to_network(network, config, snapshot_df):
             print(f"Component '{component_name}' or '{component_t_name}' not found in network")
             continue
 
-        # Determine aggregation method
-        agg_key = f"{component_name}.{attribute}"
-        agg_method = agg_methods[agg_key]
-
         # Collect all columns data first
         columns_data = {}
 
         # Process each item in the component
         for item_idx in component.index:
             item_carrier = component.loc[item_idx, 'carrier']
+            item_province = component.loc[item_idx, 'province'] if 'province' in component.columns else None
             mapped_carrier = carrier_mapping.get(item_carrier)
 
             if mapped_carrier:
                 carrier_data = group[group['carrier'] == mapped_carrier]
                 if not carrier_data.empty:
-                    if aggregation_level == 'national':
-                        national_data = carrier_data[carrier_data['region'] == national_region]
-                        if not national_data.empty:
-                            merged = pd.DataFrame({'snapshot': snapshots_dt}).merge(
-                                national_data[['snapshot', 'value']],
-                                on='snapshot',
-                                how='left'
-                            )
-                            columns_data[item_idx] = merged['value'].values
-                    else:
-                        if agg_method == 'sum':
-                            agg_data = carrier_data.groupby('snapshot')['value'].sum().reset_index()
-                        elif agg_method == 'mean':
-                            agg_data = carrier_data.groupby('snapshot')['value'].mean().reset_index()
-                        elif agg_method == 'median':
-                            agg_data = carrier_data.groupby('snapshot')['value'].median().reset_index()
-                        else:
-                            agg_data = None
+                    region_data = pd.DataFrame()
 
-                        if agg_data is not None:
-                            merged = pd.DataFrame({'snapshot': snapshots_dt}).merge(
-                                agg_data,
-                                on='snapshot',
-                                how='left'
-                            )
-                            columns_data[item_idx] = merged['value'].values
+                    if aggregation_level == 'national':
+                        # Use national-level data
+                        region_data = carrier_data[carrier_data['region'] == national_region]
+                    elif aggregation_level == 'province':
+                        # Match by province
+                        if item_province:
+                            region_data = carrier_data[carrier_data['region'] == item_province]
+                    elif aggregation_level == 'generator':
+                        # Match by generator name
+                        if 'name' in carrier_data.columns:
+                            generator_data = carrier_data[carrier_data['name'] == item_idx]
+                            if not generator_data.empty:
+                                region_data = generator_data
+                            elif item_province:
+                                # Fallback to province
+                                region_data = carrier_data[carrier_data['region'] == item_province]
+
+                    if not region_data.empty:
+                        merged = pd.DataFrame({'snapshot': snapshots_dt}).merge(
+                            region_data[['snapshot', 'value']],
+                            on='snapshot',
+                            how='left'
+                        )
+                        columns_data[item_idx] = merged['value'].values
 
         # Create the DataFrame all at once
         if columns_data:
