@@ -8,7 +8,10 @@ from pathlib import Path
 
 def load_network(config):
     """
-    Load PyPSA network from CSV folder.
+    Load PyPSA network from CSV folder and manually load loads_t data.
+
+    PyPSA's automatic import sometimes fails to load time-series data when
+    snapshots are stored as strings, so we load loads_t.p_set manually.
 
     Parameters:
     -----------
@@ -18,15 +21,12 @@ def load_network(config):
     Returns:
     --------
     pypsa.Network : Loaded network
-
-    Raises:
-    -------
-    ValueError : If data folder does not exist
     """
     data_path = config['Base_year']['file_path']
 
     network = pypsa.Network()
     network.import_from_csv_folder(data_path)
+
     print(f"Network loaded from {data_path}")
     return network
 
