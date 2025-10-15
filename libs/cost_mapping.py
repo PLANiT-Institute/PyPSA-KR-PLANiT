@@ -93,13 +93,17 @@ def apply_snapshot_data_to_network(network, config, snapshot_df):
     carrier_mapping = config['carrier_mapping']
     regional_agg_config = config['regional_aggregation']
     national_region = regional_agg_config['national_region']
-    agg_methods = regional_agg_config['aggregation_methods']
+    agg_methods = regional_agg_config['snapshot_t']
 
     # Filter only active (TRUE) status records
     active_df = snapshot_df[snapshot_df['status'] == True].copy()
 
-    # Get network snapshots
+    # Get network snapshots and ensure they're datetime
     snapshots = network.snapshots
+    if isinstance(snapshots[0], str):
+        snapshots_dt = pd.to_datetime(snapshots, dayfirst=True)
+    else:
+        snapshots_dt = pd.DatetimeIndex(snapshots)
 
     # Group by components, components_t, attribute, and aggregation level
     for (component_name, component_t_name, attribute, aggregation_level), group in active_df.groupby(['components', 'components_t', 'attribute', 'aggregation']):
@@ -130,7 +134,7 @@ def apply_snapshot_data_to_network(network, config, snapshot_df):
                     if aggregation_level == 'national':
                         national_data = carrier_data[carrier_data['region'] == national_region]
                         if not national_data.empty:
-                            merged = pd.DataFrame({'snapshot': snapshots}).merge(
+                            merged = pd.DataFrame({'snapshot': snapshots_dt}).merge(
                                 national_data[['snapshot', 'value']],
                                 on='snapshot',
                                 how='left'
@@ -147,7 +151,7 @@ def apply_snapshot_data_to_network(network, config, snapshot_df):
                             agg_data = None
 
                         if agg_data is not None:
-                            merged = pd.DataFrame({'snapshot': snapshots}).merge(
+                            merged = pd.DataFrame({'snapshot': snapshots_dt}).merge(
                                 agg_data,
                                 on='snapshot',
                                 how='left'

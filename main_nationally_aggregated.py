@@ -34,8 +34,8 @@ for year in years:
     # to-do
     # develop filtering by year for other years
     # for other years base network - retirements + addition
-    # develop a function to create monthly or yearly renewable capacity
     # develop a function to create grid network by region based on the OSM grid
+    # aggregate generators by carrier?
 
     # Load network
     network = load_network(config)

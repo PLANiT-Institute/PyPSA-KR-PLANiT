@@ -1,7 +1,7 @@
 # Configuration for mapping component carriers to monthly data
 
 # Carrier mapping matrix
-# Maps component carrier names to monthly_t carrier names
+# Maps network component carrier names to data file carrier names
 carrier_mapping:
   # Fossil fuels
   bituminous: bituminous
@@ -24,8 +24,11 @@ carrier_mapping:
 
   # Others
   miscellaneous: miscellaneous
+  fuelcell: fuelcell
+  IGCC: IGCC
+  waste: waste
 
-# Monthly data file path
+# Monthly time-series data file path
 monthly_data:
   file_path: "data/add/monthly_t.csv"
 
@@ -33,12 +36,14 @@ monthly_data:
 snapshot_data:
   file_path: "data/add/snapshot_t.csv"
 
-# Regional aggregation settings for snapshot data
-# Specify how to aggregate regional data to national level
-# Format: component.attribute: aggregation_method
+# Regional aggregation settings
 regional_aggregation:
-  national_region: "KR"  # Name of the national-level region in the data
-  aggregation_methods:
+  national_region: "KR"
+  # Aggregation methods for monthly_t data
+  monthly_t:
+    generators.marginal_cost: mean
+  # Aggregation methods for snapshot_t data
+  snapshot_t:
     generators.p_max_pu: mean
 
 # Base data file path
