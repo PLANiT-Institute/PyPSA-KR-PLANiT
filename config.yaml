@@ -48,3 +48,24 @@ Base_year:
 # Modelling years (list of years to analyze)
 Years:
   - 2024
+
+# CC generator merge rules
+# Defines how to aggregate attributes when merging combined cycle generators
+cc_merge_rules:
+  # p_nom is always summed (hardcoded)
+  build_year: oldest      # Use the oldest (minimum) build year
+  capital_cost: largest   # Use the largest (maximum) capital cost
+  p_nom: sum
+  others: p_nom
+  name: cc_group
+  # Add more rules as needed:
+  # attribute_name: rule
+  #
+  # Available rules:
+  #   - oldest: Use minimum value (for years, dates)
+  #   - newest: Use maximum value (for years, dates)
+  #   - largest: Use maximum value (for costs, capacities)
+  #   - smallest: Use minimum value
+  #   - p_nom: Use value from generator with largest p_nom
+  #   - sum: Sum all values
+  #   - mean: Average of all values
