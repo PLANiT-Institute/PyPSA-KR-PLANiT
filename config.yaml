@@ -1,0 +1,51 @@
+# Configuration for mapping component carriers to monthly data
+
+# Carrier mapping matrix
+# Maps component carrier names to monthly_t carrier names
+carrier_mapping:
+  # Fossil fuels
+  bituminous: bituminous
+  anthracite: anthracite
+  oil: oil
+  "heavy oil": oil
+  diesel: oil
+  LNG: LNG
+
+  # Nuclear
+  nuclear: nuclear
+
+  # Renewables and storage
+  bio: bio
+  solar: solar
+  wind: wind
+  hydro: hydro
+  ocean: ocean
+  PSH: PSH
+
+  # Others
+  miscellaneous: miscellaneous
+
+# Monthly data file path
+monthly_data:
+  file_path: "data/add/monthly_t.csv"
+
+# Snapshot-level data file path
+snapshot_data:
+  file_path: "data/add/snapshot_t.csv"
+
+# Regional aggregation settings for snapshot data
+# Specify how to aggregate regional data to national level
+# Format: component.attribute: aggregation_method
+regional_aggregation:
+  national_region: "KR"  # Name of the national-level region in the data
+  aggregation_methods:
+    generators.p_max_pu: mean
+
+# Base data file path
+Base_year:
+  year: 2024
+  file_path: "data/2024"
+
+# Modelling years (list of years to analyze)
+Years:
+  - 2024
