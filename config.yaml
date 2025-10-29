@@ -69,3 +69,28 @@ cc_merge_rules:
   #   - p_nom: Use value from generator with largest p_nom
   #   - sum: Sum all values
   #   - mean: Average of all values
+  #   - remove: Remove this attribute from merged generator
+
+# Generator aggregator rules
+# Defines how to aggregate attributes when aggregating generators by carrier
+generator_aggregator_rules:
+  carrier: carrier        # Use the carrier value itself
+  bus: p_nom              # Use bus from generator with largest p_nom
+  p_nom: sum              # Sum all p_nom values
+  build_year: oldest      # Use the oldest build year
+  capital_cost: mean      # Use mean capital cost
+  marginal_cost: mean     # Use mean marginal cost
+  efficiency: mean        # Use mean efficiency
+
+  # Remove custom attributes that don't make sense when aggregated
+  address: remove
+  province: remove
+  company: remove
+  membership: remove
+  market: remove
+  control: remove
+  cc_group: remove
+  name: remove
+
+  # Default rule for unspecified attributes
+  others: sum
