@@ -182,3 +182,5 @@ cython_debug/
 
 pypsa-earth/
 pypsa-kr/
+data/raw
+
