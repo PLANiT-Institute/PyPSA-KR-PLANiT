@@ -2,6 +2,38 @@
 
 This directory contains utility scripts for the PyPSA Alternative project.
 
+## Interactive GUI
+
+**utils_gui.py** - Graphical interface to run all 8 utilities with a click
+
+```bash
+# Launch GUI
+python utils_gui.py
+
+# Or use launchers
+./run_utils_gui.sh        # macOS/Linux
+run_utils_gui.bat         # Windows
+```
+
+The GUI provides:
+- 8 tabs - one for each utility
+- Point-and-click interface
+- Real-time output console
+- No command-line knowledge required
+- All utilities in one window
+
+**Available Tools:**
+1. 📍 Geocoding - Add coordinates to CSV files
+2. 🌍 Network Download - Download power network data
+3. 📊 CSV→Excel - Convert CSV to Excel format
+4. 🔤 Encoding - Convert EUC-KR/CP949 to UTF-8
+5. ⚡ Add CC Groups - Add combined cycle group names
+6. 🔗 Merge CC - Merge CC generators by group
+7. 🗺️ Expand Mainland - Expand 육지 data to provinces
+8. 🏷️ Unique Names - Make name column unique
+
+See `../doc/GUI_README.md` for full GUI documentation.
+
 ## Available Utilities
 
 ### 1. download_pypsa_earth.py

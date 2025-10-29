@@ -87,7 +87,29 @@ pypsa_alternative/
 
 ## Usage
 
-### Download PyPSA-Earth Network Data
+### GUI Application (Recommended)
+
+The easiest way to use the utilities is through the graphical interface:
+
+```bash
+# Launch the GUI
+python pypsa_gui.py
+
+# Or use the launcher scripts
+./run_gui.sh        # macOS/Linux
+run_gui.bat         # Windows
+```
+
+The GUI provides:
+- User-friendly interface for all utilities
+- Point-and-click configuration
+- Real-time output console
+- Prerequisite checking
+- No command-line knowledge required
+
+### Command-Line Usage
+
+#### Download PyPSA-Earth Network Data
 
 ```bash
 # Basic usage

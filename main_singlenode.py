@@ -18,7 +18,7 @@ Returns:
 dict : Dictionary of networks keyed by year
 """
 
-config_path='config.yaml'
+config_path='config/config.yaml'
 # Load configuration
 config = load_config(config_path)
 
