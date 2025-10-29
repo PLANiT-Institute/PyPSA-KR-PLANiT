@@ -177,13 +177,26 @@ class UtilsGUI:
         ttk.Radiobutton(lang_frame, text="English", variable=self.revgeo_language_var, value="en").pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(lang_frame, text="한국어 (Korean)", variable=self.revgeo_language_var, value="ko").pack(side=tk.LEFT, padx=5)
 
+        # Timeout setting
+        timeout_frame = ttk.Frame(opt_frame)
+        timeout_frame.pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(timeout_frame, text="API Timeout (seconds):").pack(side=tk.LEFT)
+        self.revgeo_timeout_var = tk.StringVar(value="1")
+        timeout_entry = ttk.Entry(timeout_frame, textvariable=self.revgeo_timeout_var, width=5)
+        timeout_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(timeout_frame, text="(increase if getting timeouts)", font=("Helvetica", 8), foreground="gray").pack(side=tk.LEFT)
+
+        # Dry run option
+        self.revgeo_dryrun_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt_frame, text="Dry run (test with first 10 rows only)", variable=self.revgeo_dryrun_var).pack(anchor=tk.W, pady=(5, 0))
+
         # Info about output
         info_frame = ttk.LabelFrame(main_frame, text="Output Columns Added", padding="10")
         info_frame.pack(fill=tk.X, pady=5)
 
-        info_text = """Country, country_code, state, province, region, city, town, village,
-county, municipality, suburb, district, postcode"""
-        ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray").pack()
+        info_text = """region_1: Province/State (e.g., Gangwon State, 강원도, Seoul, 서울특별시)
+region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천구)"""
+        ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray", justify=tk.LEFT).pack(anchor=tk.W)
 
         ttk.Button(main_frame, text="▶ Run Reverse Geocoding", command=self.run_reverse_geocode).pack(pady=10)
 
@@ -791,13 +804,21 @@ county, municipality, suburb, district, postcode"""
                 # Use cache in parent directory
                 cache_path = Path(__file__).parent.parent / "cache" / "reverse_geocode_cache.json"
                 language = self.revgeo_language_var.get()
-                geocoder = ReverseGeocoder(cache_file=str(cache_path), language=language)
+
+                # Get timeout value
+                try:
+                    timeout = int(self.revgeo_timeout_var.get())
+                except ValueError:
+                    timeout = 1
+
+                geocoder = ReverseGeocoder(cache_file=str(cache_path), language=language, timeout=timeout)
                 geocoder.process_csv(
                     input_file=input_file,
                     output_file=output_file,
                     x_column=self.revgeo_x_var.get(),
                     y_column=self.revgeo_y_var.get(),
-                    overwrite=self.revgeo_overwrite_var.get()
+                    overwrite=self.revgeo_overwrite_var.get(),
+                    dry_run=self.revgeo_dryrun_var.get()
                 )
 
                 self.log("\n✓ Reverse geocoding completed!")

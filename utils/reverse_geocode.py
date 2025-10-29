@@ -20,7 +20,7 @@ import time
 class ReverseGeocoder:
     """Reverse geocode coordinates to get region information."""
 
-    def __init__(self, cache_file='cache/reverse_geocode_cache.json', user_agent='pypsa_reverse_geocoder', language='en'):
+    def __init__(self, cache_file='cache/reverse_geocode_cache.json', user_agent='pypsa_reverse_geocoder', language='en', timeout=1):
         """
         Initialize reverse geocoder with caching.
 
@@ -32,9 +32,12 @@ class ReverseGeocoder:
             User agent for Nominatim API
         language : str
             Language for region names: 'en' (English) or 'ko' (Korean)
+        timeout : int
+            Request timeout in seconds (default: 1)
         """
         self.cache_file = cache_file
         self.language = language
+        self.timeout = timeout
 
         # Create cache directory if needed
         cache_dir = Path(cache_file).parent
@@ -44,8 +47,8 @@ class ReverseGeocoder:
 
         self.cache = self._load_cache()
 
-        # Initialize geocoder
-        self.geolocator = Nominatim(user_agent=user_agent)
+        # Initialize geocoder with specified timeout
+        self.geolocator = Nominatim(user_agent=user_agent, timeout=self.timeout)
         # Rate limiter: 1 request per second for Nominatim
         self.reverse = RateLimiter(self.geolocator.reverse, min_delay_seconds=1)
 
@@ -92,8 +95,8 @@ class ReverseGeocoder:
             return self.cache[cache_key]
 
         try:
-            # Reverse geocode with specified language
-            location = self.reverse((y, x), language=self.language)
+            # Reverse geocode with specified language and timeout
+            location = self.reverse((y, x), language=self.language, timeout=self.timeout)
 
             if not location or not location.raw.get('address'):
                 print(f"  Warning: No address found for ({y:.4f}, {x:.4f})")
@@ -103,26 +106,29 @@ class ReverseGeocoder:
             # Extract address components
             address = location.raw['address']
 
-            # Build result with all possible region levels
-            result = {
-                'country': address.get('country', ''),
-                'country_code': address.get('country_code', '').upper(),
-                'state': address.get('state', ''),
-                'province': address.get('province', ''),
-                'region': address.get('region', ''),
-                'city': address.get('city', ''),
-                'town': address.get('town', ''),
-                'village': address.get('village', ''),
-                'county': address.get('county', ''),
-                'municipality': address.get('municipality', ''),
-                'suburb': address.get('suburb', ''),
-                'district': address.get('district', ''),
-                'postcode': address.get('postcode', '')
-            }
+            # Determine level 1 (province/state)
+            level1 = (address.get('province') or
+                     address.get('state') or
+                     address.get('region') or
+                     address.get('city') or '')
 
-            # For better compatibility, use state as province if province is empty
-            if not result['province'] and result['state']:
-                result['province'] = result['state']
+            # Determine level 2 (county/city/district)
+            level2 = (address.get('county') or
+                     address.get('city') or
+                     address.get('municipality') or
+                     address.get('district') or
+                     address.get('town') or '')
+
+            # For special cities like Seoul (서울특별시), if level1 is the city,
+            # use district/suburb as level2
+            if level1 == address.get('city') and not level2:
+                level2 = address.get('district') or address.get('suburb') or ''
+
+            # Build result with only 2 administrative levels
+            result = {
+                'region_1': level1,
+                'region_2': level2
+            }
 
             # Cache the result
             self.cache[cache_key] = result
@@ -135,7 +141,7 @@ class ReverseGeocoder:
             return {}
 
     def process_csv(self, input_file, output_file, x_column='x', y_column='y',
-                    overwrite=False, language=None):
+                    overwrite=False, language=None, dry_run=False):
         """
         Process CSV file to add region information.
 
@@ -153,6 +159,8 @@ class ReverseGeocoder:
             If True, overwrite existing region columns
         language : str, optional
             Language override ('en' or 'ko'). If None, uses instance language.
+        dry_run : bool
+            If True, process only first 10 rows for testing
 
         Returns:
         --------
@@ -183,28 +191,33 @@ class ReverseGeocoder:
 
             print(f"  Found {len(df)} rows")
 
-            # Region columns to add
-            region_cols = ['country', 'country_code', 'state', 'province', 'region',
-                          'city', 'town', 'village', 'county', 'municipality',
-                          'suburb', 'district', 'postcode']
+            # Region columns to add (only 2 levels)
+            region_cols = ['region_1', 'region_2']
 
-            # Initialize columns if they don't exist
+            # Initialize columns if they don't exist (with string dtype to avoid warnings)
             for col in region_cols:
                 if col not in df.columns or overwrite:
                     df[col] = ''
+                # Ensure column is string type to avoid dtype warnings
+                if col in df.columns:
+                    df[col] = df[col].astype(str).replace('nan', '')
 
             # Find rows that need reverse geocoding
             if overwrite:
                 needs_geocoding = df[[x_column, y_column]].notna().all(axis=1)
             else:
-                # Skip rows that already have country info
+                # Skip rows that already have region info
                 has_coords = df[[x_column, y_column]].notna().all(axis=1)
-                # Check if country column exists and has data
-                if 'country' in df.columns:
-                    has_no_country = df['country'].isna() | (df['country'] == '')
-                    needs_geocoding = has_coords & has_no_country
+                # Check if region_1 column exists and has meaningful data
+                if 'region_1' in df.columns:
+                    # Consider empty or whitespace as "needs geocoding"
+                    has_no_region = (
+                        df['region_1'].isna() |
+                        (df['region_1'].astype(str).str.strip() == '')
+                    )
+                    needs_geocoding = has_coords & has_no_region
                 else:
-                    # If country column doesn't exist, geocode all rows with coords
+                    # If region_1 column doesn't exist, geocode all rows with coords
                     needs_geocoding = has_coords
 
             rows_to_geocode = df[needs_geocoding]
@@ -217,6 +230,11 @@ class ReverseGeocoder:
                 df.to_csv(output_file, index=False, encoding='utf-8-sig')
                 print(f"  Saved: {output_file}")
                 return True
+
+            # Limit to first 10 rows for dry run
+            if dry_run:
+                rows_to_geocode = rows_to_geocode.head(10)
+                print(f"  DRY RUN MODE: Processing first 10 rows only")
 
             print(f"  Rows needing reverse geocoding: {len(rows_to_geocode)}")
 
@@ -247,7 +265,7 @@ class ReverseGeocoder:
                     self._save_cache()
 
             # Count successful reverse geocodes
-            success_count = (df['country'] != '').sum()
+            success_count = (df['region_1'] != '').sum()
             print(f"  Successfully reverse geocoded: {success_count}/{len(df)} rows")
 
             # Save output file
@@ -288,19 +306,10 @@ Examples:
   python reverse_geocode.py --input data/networks/buses.csv --output data/networks/buses_geocoded.csv --cache-file cache/my_cache.json
 
 Output columns added:
-  - country: Country name (e.g., "South Korea")
-  - country_code: 2-letter country code (e.g., "KR")
-  - state: State/province (administrative level 1)
-  - province: Province name
-  - region: Region name
-  - city: City name
-  - town: Town name
-  - village: Village name
-  - county: County name
-  - municipality: Municipality name
-  - suburb: Suburb/neighborhood
-  - district: District name
-  - postcode: Postal code
+  - region_1: Administrative level 1 (province/state/city)
+    Examples: "Gangwon State", "Gyeonggi", "Seoul", "강원도", "경기도", "서울특별시"
+  - region_2: Administrative level 2 (county/city/district)
+    Examples: "Taebaek-si", "Gapyeong-gun", "Gangnam-gu", "평창군", "가평군", "양천구"
 
 Notes:
   - Uses Nominatim API (rate limited to 1 request/second)
@@ -319,11 +328,15 @@ Notes:
                        help='Cache file path (default: cache/reverse_geocode_cache.json)')
     parser.add_argument('--language', default='en', choices=['en', 'ko'],
                        help='Language for region names: en (English) or ko (Korean)')
+    parser.add_argument('--timeout', type=int, default=1,
+                       help='API request timeout in seconds (default: 1)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Process only first 10 rows for testing')
 
     args = parser.parse_args()
 
     # Create geocoder
-    geocoder = ReverseGeocoder(cache_file=args.cache_file, language=args.language)
+    geocoder = ReverseGeocoder(cache_file=args.cache_file, language=args.language, timeout=args.timeout)
 
     # Process file
     success = geocoder.process_csv(
@@ -331,7 +344,8 @@ Notes:
         output_file=args.output,
         x_column=args.x_col,
         y_column=args.y_col,
-        overwrite=args.overwrite
+        overwrite=args.overwrite,
+        dry_run=args.dry_run
     )
 
     if success:
