@@ -13,6 +13,7 @@ from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
 import time
 import json
+import numpy as np
 
 
 class AddressGeocoder:
@@ -157,7 +158,84 @@ class AddressGeocoder:
             # DO NOT cache errors - allows retrying later
             return None, None
 
-    def process_csv(self, csv_path, address_column='address', overwrite=False):
+    def check_duplicate_coordinates(self, df):
+        """
+        Check if all rows have the same coordinates.
+
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame with x and y columns
+
+        Returns:
+        --------
+        bool : True if all non-null coordinates are identical
+        """
+        # Filter rows with valid coordinates
+        valid_coords = df[['x', 'y']].dropna()
+
+        if len(valid_coords) == 0:
+            return False
+
+        # Check if all x values are the same and all y values are the same
+        return (valid_coords['x'].nunique() == 1) and (valid_coords['y'].nunique() == 1)
+
+    def apply_jitter(self, df, jitter_km=1.0, seed=None):
+        """
+        Apply random jitter to coordinates to spread them around the original location.
+
+        Jitter is applied as random offsets within a circle of radius jitter_km.
+        Approximation: 1 km ≈ 0.009 degrees at mid-latitudes (like Korea).
+
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame with x and y columns
+        jitter_km : float
+            Radius in kilometers for jitter (default: 1.0 km)
+        seed : int, optional
+            Random seed for reproducibility
+
+        Returns:
+        --------
+        pandas.DataFrame : DataFrame with jittered coordinates
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        # Conversion factor: 1 km ≈ 0.009 degrees at mid-latitudes
+        km_to_deg = 0.009
+        jitter_deg = jitter_km * km_to_deg
+
+        # Create a copy to avoid modifying original
+        df_jittered = df.copy()
+
+        # Get rows with valid coordinates
+        valid_mask = df_jittered['x'].notna() & df_jittered['y'].notna()
+        n_valid = valid_mask.sum()
+
+        if n_valid == 0:
+            return df_jittered
+
+        # Generate random offsets within a circle of radius jitter_deg
+        # Use polar coordinates for uniform distribution within circle
+        angles = np.random.uniform(0, 2 * np.pi, n_valid)
+        # Use sqrt for uniform distribution within circle
+        radii = np.sqrt(np.random.uniform(0, 1, n_valid)) * jitter_deg
+
+        # Convert to Cartesian offsets
+        dx = radii * np.cos(angles)
+        dy = radii * np.sin(angles)
+
+        # Apply jitter to valid coordinates
+        df_jittered.loc[valid_mask, 'x'] = df_jittered.loc[valid_mask, 'x'] + dx
+        df_jittered.loc[valid_mask, 'y'] = df_jittered.loc[valid_mask, 'y'] + dy
+
+        print(f"  Applied jitter: ±{jitter_km} km to {n_valid} locations")
+
+        return df_jittered
+
+    def process_csv(self, csv_path, address_column='address', overwrite=False, jitter=None):
         """
         Process a CSV file to add x and y coordinate columns.
 
@@ -169,6 +247,11 @@ class AddressGeocoder:
             Name of the column containing addresses
         overwrite : bool
             If True, overwrite existing x and y columns
+        jitter : str or float, optional
+            If provided, apply jitter to coordinates. Can be:
+            - Float: jitter radius in kilometers (e.g., 1.0 for 1 km)
+            - String: 'jitter-X' format where X is km (e.g., 'jitter-5' for 5 km)
+            - 'auto': prompt user if all coordinates are identical
 
         Returns:
         --------
@@ -241,6 +324,46 @@ class AddressGeocoder:
             success_count = df[['x', 'y']].notna().all(axis=1).sum()
             print(f"  Successfully geocoded: {success_count}/{len(df)} rows")
 
+            # Check for duplicate coordinates and apply jitter if requested
+            jitter_km = None
+
+            if jitter is not None:
+                # Parse jitter parameter
+                if isinstance(jitter, str):
+                    if jitter.lower() == 'auto':
+                        # Check if all coordinates are identical
+                        if self.check_duplicate_coordinates(df):
+                            print("\n  WARNING: All geocoded locations are identical!")
+                            response = input("  Do you want to add jitter? (yes/no or specify km, e.g., '5' for 5 km): ").strip().lower()
+
+                            if response and response not in ['no', 'n']:
+                                if response in ['yes', 'y']:
+                                    jitter_km = 1.0  # Default 1 km
+                                else:
+                                    try:
+                                        jitter_km = float(response)
+                                    except ValueError:
+                                        print(f"  Invalid jitter value: {response}. Using default 1 km.")
+                                        jitter_km = 1.0
+                    elif jitter.lower().startswith('jitter-'):
+                        # Parse 'jitter-X' format
+                        try:
+                            jitter_km = float(jitter.split('-')[1])
+                        except (IndexError, ValueError):
+                            print(f"  Invalid jitter format: {jitter}. Expected 'jitter-X' where X is km.")
+                    else:
+                        # Try to parse as float
+                        try:
+                            jitter_km = float(jitter)
+                        except ValueError:
+                            print(f"  Invalid jitter value: {jitter}")
+                elif isinstance(jitter, (int, float)):
+                    jitter_km = float(jitter)
+
+                # Apply jitter if requested
+                if jitter_km is not None and jitter_km > 0:
+                    df = self.apply_jitter(df, jitter_km=jitter_km)
+
             # Save updated CSV with proper encoding for Korean text
             # Use utf-8-sig for Excel compatibility (adds BOM)
             df.to_csv(csv_path, index=False, encoding='utf-8-sig')
@@ -255,7 +378,7 @@ class AddressGeocoder:
             print(f"Error processing {csv_path}: {e}")
             return False
 
-    def process_folder(self, folder_path, address_column='address', overwrite=False, file_pattern='*.csv'):
+    def process_folder(self, folder_path, address_column='address', overwrite=False, file_pattern='*.csv', jitter=None):
         """
         Process all CSV files in a folder.
 
@@ -269,6 +392,8 @@ class AddressGeocoder:
             If True, overwrite existing x and y columns
         file_pattern : str
             Glob pattern for CSV files (default: '*.csv')
+        jitter : str or float, optional
+            Jitter parameter to pass to process_csv
 
         Returns:
         --------
@@ -291,7 +416,7 @@ class AddressGeocoder:
         results = {'success': 0, 'failed': 0, 'skipped': 0}
 
         for csv_file in csv_files:
-            result = self.process_csv(csv_file, address_column, overwrite)
+            result = self.process_csv(csv_file, address_column, overwrite, jitter)
             if result:
                 results['success'] += 1
             else:
@@ -333,6 +458,15 @@ Examples:
   # Use custom cache file location
   python geocode_addresses.py data/2024 --cache-file cache/my_cache.json
 
+  # Automatically prompt for jitter if all locations are identical
+  python geocode_addresses.py data/2024 --jitter auto
+
+  # Apply 5 km jitter to all coordinates
+  python geocode_addresses.py data/2024 --jitter jitter-5
+
+  # Apply 1 km jitter (numeric format)
+  python geocode_addresses.py data/2024 --jitter 1
+
 Notes:
   - The utility will skip rows that already have both x and y coordinates
   - Fallback strategy removes smallest regions if geocoding fails
@@ -340,6 +474,7 @@ Notes:
   - Stops at province+city level (minimum 2 parts) to avoid province-only results
   - Content in/after parentheses is automatically ignored
   - Only successful geocoding results are cached (failures are NOT cached)
+  - Jitter adds random offsets within specified radius to spread identical locations
         """
     )
 
@@ -352,6 +487,8 @@ Notes:
                        help='Path to cache file (default: cache/geocode_cache.json)')
     parser.add_argument('--pattern', type=str, default='*.csv',
                        help='File pattern to match (default: *.csv)')
+    parser.add_argument('--jitter', type=str, default=None,
+                       help='Add jitter to coordinates. Options: "auto" (prompt if all same), "jitter-X" (X km), or numeric value (km)')
 
     args = parser.parse_args()
 
@@ -363,7 +500,8 @@ Notes:
         folder_path=args.folder,
         address_column=args.address_column,
         overwrite=args.overwrite,
-        file_pattern=args.pattern
+        file_pattern=args.pattern,
+        jitter=args.jitter
     )
 
 
