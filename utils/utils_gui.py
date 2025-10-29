@@ -58,7 +58,7 @@ class UtilsGUI:
 
         subtitle_label = ttk.Label(
             title_frame,
-            text="Run any utility tool with a click - 8 tools available",
+            text="Run any utility tool with a click - 9 tools available",
             font=("Helvetica", 10)
         )
         subtitle_label.pack()
@@ -69,6 +69,7 @@ class UtilsGUI:
 
         # Create tabs for all utilities
         self.create_geocoding_tab()
+        self.create_reverse_geocode_tab()
         self.create_download_tab()
         self.create_csv_to_excel_tab()
         self.create_encoding_converter_tab()
@@ -124,6 +125,67 @@ class UtilsGUI:
         ttk.Radiobutton(opt_frame, text="5 km", variable=self.geo_jitter_var, value="5").pack(anchor=tk.W)
 
         ttk.Button(main_frame, text="▶ Run Geocoding", command=self.run_geocoding).pack(pady=10)
+
+    def create_reverse_geocode_tab(self):
+        """Reverse geocoding utility tab."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="🔍 Reverse Geocode")
+
+        main_frame = ttk.Frame(tab, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="Get region names from coordinates (country, province, city, etc.)",
+                 font=("Helvetica", 10, "italic")).pack(pady=5)
+
+        # File settings
+        frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
+        frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.revgeo_input_var = tk.StringVar(value="")
+        ttk.Entry(frame, textvariable=self.revgeo_input_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(frame, text="Browse", command=lambda: self.browse_file(self.revgeo_input_var, [("CSV", "*.csv")])).grid(row=0, column=2)
+
+        ttk.Label(frame, text="Output File:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.revgeo_output_var = tk.StringVar(value="")
+        ttk.Entry(frame, textvariable=self.revgeo_output_var, width=50).grid(row=1, column=1, padx=5)
+        ttk.Button(frame, text="Browse", command=lambda: self.browse_save_file(self.revgeo_output_var, [("CSV", "*.csv")])).grid(row=1, column=2)
+
+        # Column settings
+        col_frame = ttk.LabelFrame(main_frame, text="Coordinate Columns", padding="10")
+        col_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(col_frame, text="Longitude Column:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.revgeo_x_var = tk.StringVar(value="x")
+        ttk.Entry(col_frame, textvariable=self.revgeo_x_var, width=20).grid(row=0, column=1, padx=5, sticky=tk.W)
+
+        ttk.Label(col_frame, text="Latitude Column:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.revgeo_y_var = tk.StringVar(value="y")
+        ttk.Entry(col_frame, textvariable=self.revgeo_y_var, width=20).grid(row=1, column=1, padx=5, sticky=tk.W)
+
+        # Options
+        opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
+        opt_frame.pack(fill=tk.X, pady=5)
+
+        self.revgeo_overwrite_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt_frame, text="Overwrite existing region info", variable=self.revgeo_overwrite_var).pack(anchor=tk.W)
+
+        ttk.Label(opt_frame, text="Language:").pack(anchor=tk.W, pady=(10, 0))
+        self.revgeo_language_var = tk.StringVar(value="en")
+        lang_frame = ttk.Frame(opt_frame)
+        lang_frame.pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(lang_frame, text="English", variable=self.revgeo_language_var, value="en").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(lang_frame, text="한국어 (Korean)", variable=self.revgeo_language_var, value="ko").pack(side=tk.LEFT, padx=5)
+
+        # Info about output
+        info_frame = ttk.LabelFrame(main_frame, text="Output Columns Added", padding="10")
+        info_frame.pack(fill=tk.X, pady=5)
+
+        info_text = """Country, country_code, state, province, region, city, town, village,
+county, municipality, suburb, district, postcode"""
+        ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray").pack()
+
+        ttk.Button(main_frame, text="▶ Run Reverse Geocoding", command=self.run_reverse_geocode).pack(pady=10)
 
     def create_download_tab(self):
         """Network download utility tab."""
@@ -374,6 +436,14 @@ class UtilsGUI:
         if file:
             var.set(file)
 
+    def browse_save_file(self, var, filetypes=None):
+        """Browse for save file."""
+        if filetypes is None:
+            filetypes = [("All files", "*.*")]
+        file = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".csv")
+        if file:
+            var.set(file)
+
     def run_in_thread(self, func):
         """Run function in background thread."""
         thread = threading.Thread(target=func, daemon=True)
@@ -403,7 +473,9 @@ class UtilsGUI:
                 elif jitter not in ["auto"]:
                     jitter = float(jitter)
 
-                geocoder = AddressGeocoder(cache_file="../cache/geocode_cache.json")
+                # Use cache in parent directory
+                cache_path = Path(__file__).parent.parent / "cache" / "geocode_cache.json"
+                geocoder = AddressGeocoder(cache_file=str(cache_path))
                 geocoder.process_folder(
                     folder_path=folder,
                     address_column=self.geo_address_var.get(),
@@ -470,7 +542,7 @@ class UtilsGUI:
 
         def task():
             try:
-                from csv_to_excel import csv_to_excel, csv_folder_to_excel
+                from csv_to_excel import csv_to_excel, convert_directory
                 sys.stdout = RedirectText(self.console)
                 sys.stderr = RedirectText(self.console)
 
@@ -480,7 +552,7 @@ class UtilsGUI:
                 if input_p.is_file():
                     csv_to_excel(input_path, output_path)
                 else:
-                    csv_folder_to_excel(input_path, output_path)
+                    convert_directory(input_path, output_path)
 
                 self.log("\n✓ Conversion completed!")
                 self.status_var.set("Conversion completed")
@@ -544,15 +616,25 @@ class UtilsGUI:
 
         def task():
             try:
-                from add_cc_groups import add_cc_groups_to_csv
+                from add_cc_groups import read_csv_safely, add_cc_groups
                 sys.stdout = RedirectText(self.console)
                 sys.stderr = RedirectText(self.console)
 
-                add_cc_groups_to_csv(
-                    input_file,
-                    input_file,  # Overwrite
-                    backup=self.addcc_backup_var.get()
-                )
+                # Read CSV
+                df, encoding = read_csv_safely(Path(input_file), None, False)
+
+                # Backup if requested
+                if self.addcc_backup_var.get():
+                    import shutil
+                    shutil.copy(input_file, f"{input_file}.bak")
+                    self.log(f"Created backup: {input_file}.bak")
+
+                # Add CC groups
+                df = add_cc_groups(df)
+
+                # Save
+                df.to_csv(input_file, index=False, encoding='utf-8-sig')
+                self.log(f"Saved: {input_file}")
 
                 self.log("\n✓ CC groups added!")
                 self.status_var.set("CC groups added")
@@ -580,11 +662,19 @@ class UtilsGUI:
 
         def task():
             try:
-                from merge_cc_groups import merge_cc_generators_in_csv
+                from merge_cc_groups import read_csv_safely, merge_cc_by_group
                 sys.stdout = RedirectText(self.console)
                 sys.stderr = RedirectText(self.console)
 
-                merge_cc_generators_in_csv(input_file, output_file)
+                # Read CSV
+                df, encoding = read_csv_safely(Path(input_file), None, False)
+
+                # Merge CC groups
+                df = merge_cc_by_group(df)
+
+                # Save
+                df.to_csv(output_file, index=False, encoding='utf-8-sig')
+                self.log(f"Saved: {output_file}")
 
                 self.log("\n✓ CC groups merged!")
                 self.status_var.set("CC groups merged")
@@ -615,11 +705,19 @@ class UtilsGUI:
 
         def task():
             try:
-                from expand_mainland_data import expand_mainland_data
+                from expand_mainland_data import read_csv_safely, expand_mainland_to_provinces
                 sys.stdout = RedirectText(self.console)
                 sys.stderr = RedirectText(self.console)
 
-                expand_mainland_data(input_file, output_file)
+                # Read CSV
+                df, encoding = read_csv_safely(Path(input_file), None, False)
+
+                # Expand mainland
+                df = expand_mainland_to_provinces(df)
+
+                # Save
+                df.to_csv(output_file, index=False, encoding='utf-8-sig')
+                self.log(f"Saved: {output_file}")
 
                 self.log("\n✓ Mainland data expanded!")
                 self.status_var.set("Mainland expansion completed")
@@ -661,6 +759,54 @@ class UtilsGUI:
             except Exception as e:
                 self.log(f"\n✗ Error: {e}")
                 self.status_var.set("Make names unique failed")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
+    def run_reverse_geocode(self):
+        """Run reverse geocoding."""
+        input_file = self.revgeo_input_var.get()
+        output_file = self.revgeo_output_var.get()
+
+        if not input_file or not Path(input_file).exists():
+            messagebox.showerror("Error", f"Input file not found: {input_file}")
+            return
+        if not output_file:
+            messagebox.showerror("Error", "Please specify output file")
+            return
+
+        self.status_var.set("Running reverse geocoding...")
+        self.log("\n" + "="*60)
+        self.log("REVERSE GEOCODING")
+        self.log("="*60)
+
+        def task():
+            try:
+                from reverse_geocode import ReverseGeocoder
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                # Use cache in parent directory
+                cache_path = Path(__file__).parent.parent / "cache" / "reverse_geocode_cache.json"
+                language = self.revgeo_language_var.get()
+                geocoder = ReverseGeocoder(cache_file=str(cache_path), language=language)
+                geocoder.process_csv(
+                    input_file=input_file,
+                    output_file=output_file,
+                    x_column=self.revgeo_x_var.get(),
+                    y_column=self.revgeo_y_var.get(),
+                    overwrite=self.revgeo_overwrite_var.get()
+                )
+
+                self.log("\n✓ Reverse geocoding completed!")
+                self.status_var.set("Reverse geocoding completed")
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Reverse geocoding failed")
             finally:
                 sys.stdout = self.original_stdout
                 sys.stderr = self.original_stderr

@@ -23,14 +23,15 @@ The GUI provides:
 - All utilities in one window
 
 **Available Tools:**
-1. 📍 Geocoding - Add coordinates to CSV files
-2. 🌍 Network Download - Download power network data
-3. 📊 CSV→Excel - Convert CSV to Excel format
-4. 🔤 Encoding - Convert EUC-KR/CP949 to UTF-8
-5. ⚡ Add CC Groups - Add combined cycle group names
-6. 🔗 Merge CC - Merge CC generators by group
-7. 🗺️ Expand Mainland - Expand 육지 data to provinces
-8. 🏷️ Unique Names - Make name column unique
+1. 📍 Geocoding - Add coordinates to CSV files (address → x, y)
+2. 🔍 Reverse Geocode - Get region names from coordinates (x, y → country, province, city, etc.)
+3. 🌍 Network Download - Download power network data
+4. 📊 CSV→Excel - Convert CSV to Excel format
+5. 🔤 Encoding - Convert EUC-KR/CP949 to UTF-8
+6. ⚡ Add CC Groups - Add combined cycle group names
+7. 🔗 Merge CC - Merge CC generators by group
+8. 🗺️ Expand Mainland - Expand 육지 data to provinces
+9. 🏷️ Unique Names - Make name column unique
 
 See `../doc/GUI_README.md` for full GUI documentation.
 
@@ -119,6 +120,79 @@ When all geocoded locations are identical (e.g., all addresses resolve to the sa
 - Cache location: `cache/geocode_cache.json`
 - Only successful results are cached
 - Speeds up repeated geocoding operations
+
+### 2. reverse_geocode.py
+
+Reverse geocodes coordinates (x, y) to get detailed region information.
+
+**Requirements:**
+- Internet connection (uses Nominatim API)
+- CSV files with coordinate columns (x, y or lon, lat)
+
+**Usage:**
+```bash
+# Basic usage
+python reverse_geocode.py --input data/networks/buses.csv --output data/networks/buses_geocoded.csv
+
+# Custom coordinate column names
+python reverse_geocode.py --input data/networks/buses.csv --output data/networks/buses_geocoded.csv --x-col lon --y-col lat
+
+# Overwrite existing region info
+python reverse_geocode.py --input data/networks/buses.csv --output data/networks/buses_geocoded.csv --overwrite
+
+# Custom cache file
+python reverse_geocode.py --input data/networks/buses.csv --output data/networks/buses_geocoded.csv --cache-file cache/my_cache.json
+```
+
+**Arguments:**
+- `--input`: Input CSV file with coordinates (required)
+- `--output`: Output CSV file (required)
+- `--x-col`: Longitude column name (default: 'x')
+- `--y-col`: Latitude column name (default: 'y')
+- `--overwrite`: Overwrite existing region columns
+- `--cache-file`: Cache file path (default: cache/reverse_geocode_cache.json)
+
+**Output Columns Added:**
+The utility adds these columns to your CSV:
+- `country`: Country name (e.g., "South Korea")
+- `country_code`: 2-letter ISO code (e.g., "KR")
+- `state`: State/province (administrative level 1)
+- `province`: Province name
+- `region`: Region name
+- `city`: City name
+- `town`: Town name
+- `village`: Village name
+- `county`: County name
+- `municipality`: Municipality name
+- `suburb`: Suburb/neighborhood name
+- `district`: District name
+- `postcode`: Postal/ZIP code
+
+**Example:**
+Input (buses.csv):
+```
+name,x,y
+Bus1,126.9780,37.5665
+Bus2,127.0276,37.4979
+```
+
+Output (buses_geocoded.csv):
+```
+name,x,y,country,country_code,province,city
+Bus1,126.9780,37.5665,South Korea,KR,Seoul,Seoul
+Bus2,127.0276,37.4979,South Korea,KR,Seoul,Gangnam-gu
+```
+
+**Features:**
+- Rate limited (1 request/second for Nominatim)
+- Results are cached for speed
+- Skips rows that already have country info (unless --overwrite)
+- Handles missing coordinates gracefully
+
+**Caching:**
+- Cache location: `cache/reverse_geocode_cache.json`
+- Only successful results are cached
+- Cache key format: `{latitude:.6f},{longitude:.6f}`
 
 ## Backend Libraries
 
