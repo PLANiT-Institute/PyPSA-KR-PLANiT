@@ -139,20 +139,33 @@ def _clean_duplicate_columns(network):
         network.buses.drop(columns=duplicate_cols, inplace=True)
 
 
-def _aggregate_buses_by_region(network, region_column):
+def _create_bus_to_region_mapping(network, region_column):
     """
-    Aggregate buses by region, creating one bus per region.
+    Create mapping from old bus names to regional bus names.
 
-    Returns a mapping from old bus names to new regional bus names.
+    This is called BEFORE aggregating buses, so we can update components
+    that reference buses before the old buses are removed.
     """
-    print(f"[info] Aggregating {len(network.buses)} buses by '{region_column}'...")
+    print(f"[info] Creating bus-to-region mapping from '{region_column}'...")
+
+    # Create mapping from old bus to region
+    bus_to_region = network.buses[region_column].to_dict()
 
     # Get unique regions
     regions = network.buses[region_column].dropna().unique()
     print(f"[info] Found {len(regions)} unique regions: {sorted(regions)}")
 
-    # Create mapping from old bus to region
-    bus_to_region = network.buses[region_column].to_dict()
+    return bus_to_region, regions
+
+
+def _aggregate_buses_by_region(network, region_column, regions):
+    """
+    Aggregate buses by region, creating one bus per region.
+
+    This should be called AFTER components (lines, generators, etc.) have been
+    updated to reference regional buses.
+    """
+    print(f"[info] Aggregating {len(network.buses)} buses by '{region_column}'...")
 
     # Get country from existing bus data
     country = network.buses['country'].iloc[0] if 'country' in network.buses.columns else 'KR'
@@ -195,7 +208,6 @@ def _aggregate_buses_by_region(network, region_column):
         network.remove("Bus", old_bus)
 
     print(f"[info] Created {len(regions)} regional buses")
-    return bus_to_region
 
 
 def _map_generators_to_regional_buses(network, region_column):
@@ -218,6 +230,153 @@ def _map_generators_to_regional_buses(network, region_column):
             unmapped_count += 1
 
     print(f"[info] Mapped {mapped_count} generators to regional buses, {unmapped_count} unmapped")
+
+
+def _aggregate_lines_by_region(network, region_column, line_config, bus_to_region):
+    """Aggregate lines by region pairs."""
+    print(f"[info] Aggregating {len(network.lines)} lines by region pairs...")
+
+    if len(network.lines) == 0:
+        return
+
+    # Map line endpoints to regions
+    network.lines['region0'] = network.lines['bus0'].map(bus_to_region)
+    network.lines['region1'] = network.lines['bus1'].map(bus_to_region)
+
+    # Remove lines with unmapped buses
+    valid_mask = network.lines['region0'].notna() & network.lines['region1'].notna()
+    invalid_count = (~valid_mask).sum()
+    if invalid_count > 0:
+        print(f"[warn] Removing {invalid_count} lines with unmapped buses")
+    network.lines = network.lines[valid_mask].copy()
+
+    # Remove self-loops if configured
+    if line_config.get('remove_self_loops', True):
+        self_loop_mask = network.lines['region0'] != network.lines['region1']
+        removed = (~self_loop_mask).sum()
+        network.lines = network.lines[self_loop_mask].copy()
+        print(f"[info] Removed {removed} self-loop lines")
+
+    # Group by region pairs
+    grouping = line_config.get('grouping', 'by_voltage')
+    if grouping == 'by_voltage' and 'v_nom' in network.lines.columns:
+        group_cols = ['region0', 'region1', 'v_nom']
+    else:
+        group_cols = ['region0', 'region1']
+
+    # Store old lines
+    old_lines = []
+    grouped_lines = []
+
+    for group_key, group in network.lines.groupby(group_cols):
+        old_lines.extend(group.index.tolist())
+
+        # Aggregate line properties
+        agg_line = {
+            'bus0': group_key[0] if len(group_key) >= 1 else None,
+            'bus1': group_key[1] if len(group_key) >= 2 else None,
+        }
+
+        # Add v_nom if grouping by voltage
+        if len(group_key) >= 3:
+            agg_line['v_nom'] = group_key[2]
+
+        # Aggregate circuits
+        circuits_rule = line_config.get('circuits', 'sum')
+        if circuits_rule == 'sum':
+            total_circuits = group['circuits'].sum()
+        elif circuits_rule == 'max':
+            total_circuits = group['circuits'].max()
+        elif circuits_rule == 'mean':
+            total_circuits = group['circuits'].mean()
+        else:
+            total_circuits = group['circuits'].sum()
+
+        agg_line['num_parallel'] = total_circuits
+
+        # Aggregate s_nom
+        s_nom_rule = line_config.get('s_nom', 'keep_original')
+        if s_nom_rule == 'sum':
+            agg_line['s_nom'] = group['s_nom'].sum()
+        elif s_nom_rule == 'max':
+            agg_line['s_nom'] = group['s_nom'].max()
+        elif s_nom_rule == 'scale_by_circuits':
+            agg_line['s_nom'] = group['s_nom'].iloc[0] * total_circuits
+        else:  # keep_original
+            agg_line['s_nom'] = group['s_nom'].iloc[0]
+
+        # Aggregate impedances (r, x, b)
+        impedance_rule = line_config.get('impedance', 'weighted_by_circuits')
+        if impedance_rule == 'weighted_by_circuits':
+            # Weighted average by circuits
+            weights = group['circuits']
+            weight_sum = weights.sum()
+            if weight_sum > 0:
+                agg_line['r'] = (group['r'] * weights).sum() / weight_sum
+                agg_line['x'] = (group['x'] * weights).sum() / weight_sum
+                agg_line['b'] = (group['b'] * weights).sum() / weight_sum
+            else:
+                agg_line['r'] = group['r'].mean()
+                agg_line['x'] = group['x'].mean()
+                agg_line['b'] = group['b'].mean()
+        elif impedance_rule == 'mean':
+            agg_line['r'] = group['r'].mean()
+            agg_line['x'] = group['x'].mean()
+            agg_line['b'] = group['b'].mean()
+        elif impedance_rule == 'min':
+            agg_line['r'] = group['r'].min()
+            agg_line['x'] = group['x'].min()
+            agg_line['b'] = group['b'].min()
+        elif impedance_rule == 'max':
+            agg_line['r'] = group['r'].max()
+            agg_line['x'] = group['x'].max()
+            agg_line['b'] = group['b'].max()
+
+        # Aggregate length
+        if 'length' in group.columns:
+            length_rule = line_config.get('length', 'mean')
+            if length_rule == 'mean':
+                agg_line['length'] = group['length'].mean()
+            elif length_rule == 'max':
+                agg_line['length'] = group['length'].max()
+            elif length_rule == 'min':
+                agg_line['length'] = group['length'].min()
+
+        # Copy other fields if they exist
+        for field in ['type', 'terrain_factor']:
+            if field in group.columns:
+                value = group[field].iloc[0]
+                if pd.notna(value) and value != '':
+                    agg_line[field] = value
+
+        grouped_lines.append(agg_line)
+
+    # Remove old lines (and their time-series data)
+    for line_name in old_lines:
+        network.remove("Line", line_name)
+
+    # Add aggregated lines
+    for i, line_data in enumerate(grouped_lines):
+        line_name = f"line_{line_data['bus0']}_{line_data['bus1']}_{i}"
+        bus0 = line_data.pop('bus0')
+        bus1 = line_data.pop('bus1')
+
+        network.add("Line", line_name, bus0=bus0, bus1=bus1, **line_data)
+
+    # Ensure time-series data has proper dimension names
+    if hasattr(network.lines_t, 'p0') and network.lines_t.p0 is not None:
+        if not network.lines_t.p0.index.name:
+            network.lines_t.p0.index.name = 'snapshot'
+        if not network.lines_t.p0.columns.name:
+            network.lines_t.p0.columns.name = 'Line'
+
+    if hasattr(network.lines_t, 'p1') and network.lines_t.p1 is not None:
+        if not network.lines_t.p1.index.name:
+            network.lines_t.p1.index.name = 'snapshot'
+        if not network.lines_t.p1.columns.name:
+            network.lines_t.p1.columns.name = 'Line'
+
+    print(f"[info] Aggregated into {len(grouped_lines)} regional lines")
 
 
 def _aggregate_links_by_region(network, region_column, link_config, bus_to_region):
@@ -333,11 +492,9 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
     print(f"[info] Aggregated into {len(grouped_links)} regional links")
 
 
-def _create_regional_loads(network, region_column, demand_file, province_mapping, load_carrier, demand_scale_factor=1.0):
+def _create_regional_loads(network, region_column, demand_file, province_mapping, load_carrier):
     """Create regional loads based on demand data."""
     print(f"[info] Creating regional loads from {demand_file}...")
-    if demand_scale_factor != 1.0:
-        print(f"[info] Applying demand scale factor: {demand_scale_factor}")
 
     # Save existing load time series BEFORE removing invalid loads
     # This preserves the temporal pattern for distribution across regions
@@ -409,8 +566,8 @@ def _create_regional_loads(network, region_column, demand_file, province_mapping
                     # The base pattern will be distributed across regions
                     load_value = base_load_pattern.mean() * ratio
                 else:
-                    # Use absolute value with scaling factor if no pattern exists
-                    load_value = row['demand'] * demand_scale_factor
+                    # Use absolute value if no pattern exists
+                    load_value = row['demand']
 
                 # Only create if doesn't exist
                 if load_name not in network.loads.index:
@@ -454,10 +611,14 @@ def aggregate_network_by_region(network, config):
 
     Performs all aggregation steps:
     1. Clean duplicate columns
-    2. Aggregate buses by region (one bus per region)
-    3. Map generators to regional buses
-    4. Aggregate links by region pairs
-    5. Create regional loads from demand data
+    2. Create bus-to-region mapping
+    3. Update all components to reference regional buses:
+       a. Map generators to regional buses
+       b. Aggregate lines by region pairs
+       c. Aggregate links by region pairs
+    4. Aggregate buses by region (remove old buses, create regional buses)
+    5. Optionally aggregate generators by carrier and region
+    6. Create regional loads from demand data
 
     Parameters:
     -----------
@@ -490,27 +651,38 @@ def aggregate_network_by_region(network, config):
     # Step 1: Clean duplicate columns
     _clean_duplicate_columns(network)
 
-    # Step 2: Aggregate buses by region (creates bus_to_region mapping)
-    bus_to_region = _aggregate_buses_by_region(network, region_column)
+    # Step 2: Create bus-to-region mapping (BEFORE removing old buses)
+    bus_to_region, regions = _create_bus_to_region_mapping(network, region_column)
 
-    # Step 3: Map generators to regional buses
+    # Step 3: Update all components to reference regional buses
+    # (MUST be done before removing old buses)
+
+    # Step 3a: Map generators to regional buses
     _map_generators_to_regional_buses(network, region_column)
 
-    # Step 3b: Optionally aggregate generators by carrier and region
-    if regional_config.get('aggregate_generators_by_carrier', False):
-        from libs.aggregators import aggregate_generators_by_carrier_and_region
-        network = aggregate_generators_by_carrier_and_region(network, config, region_column)
+    # Step 3b: Aggregate lines by region pairs (updates bus references)
+    if len(network.lines) > 0:
+        _aggregate_lines_by_region(network, region_column,
+                                   regional_config.get('lines', {}),
+                                   bus_to_region)
 
-    # Step 4: Aggregate links by region pairs
+    # Step 3c: Aggregate links by region pairs (updates bus references)
     if len(network.links) > 0:
         _aggregate_links_by_region(network, region_column,
                                    regional_config.get('links', {}),
                                    bus_to_region)
 
-    # Step 5: Create regional loads
-    demand_scale_factor = regional_config.get('demand_scale_factor', 1.0)
+    # Step 4: Now aggregate buses by region (removes old buses, creates regional buses)
+    _aggregate_buses_by_region(network, region_column, regions)
+
+    # Step 5: Optionally aggregate generators by carrier and region
+    if regional_config.get('aggregate_generators_by_carrier', False):
+        from libs.aggregators import aggregate_generators_by_carrier_and_region
+        network = aggregate_generators_by_carrier_and_region(network, config, region_column)
+
+    # Step 6: Create regional loads
     _create_regional_loads(network, region_column, demand_file,
-                          province_mapping, load_carrier, demand_scale_factor)
+                          province_mapping, load_carrier)
 
     print("[info] Regional aggregation complete")
 

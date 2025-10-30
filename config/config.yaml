@@ -133,7 +133,7 @@ regional_aggregation:
     #   - sum: Sum all s_nom values
     #   - max: Use maximum s_nom
     #   - scale_by_circuits: s_nom * total_circuits (total capacity)
-    s_nom: keep_original
+    s_nom: scale_by_circuits
 
     # How to aggregate r, x, b (resistance, reactance, susceptance)
     # Options:

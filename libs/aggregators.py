@@ -226,8 +226,8 @@ def aggregate_generators_by_carrier_and_region(network, config=None, region_colu
     if timeseries_data:
         print(f"[info] Aggregating {len(timeseries_data)} time-series attributes...")
         for attr, ts_df in timeseries_data.items():
-            # Create new time-series DataFrame for aggregated generators
-            new_ts_df = pd.DataFrame(index=ts_df.index)
+            # Collect all columns first to avoid DataFrame fragmentation
+            new_columns = {}
 
             for group_key, gen_info in merged_generators.items():
                 carrier = gen_info['carrier']
@@ -254,13 +254,14 @@ def aggregate_generators_by_carrier_and_region(network, config=None, region_colu
                 # Use sum for power outputs (p_set, etc.)
                 if attr in ['p_set', 'p_min_pu', 'p_max_pu']:
                     # For power-related attributes, sum across generators
-                    new_ts_df[merged_name] = ts_df[old_gen_names_in_ts].sum(axis=1)
+                    new_columns[merged_name] = ts_df[old_gen_names_in_ts].sum(axis=1)
                 else:
                     # For other attributes (costs, efficiency), use mean
-                    new_ts_df[merged_name] = ts_df[old_gen_names_in_ts].mean(axis=1)
+                    new_columns[merged_name] = ts_df[old_gen_names_in_ts].mean(axis=1)
 
-            # Assign aggregated time-series data back to network
-            if len(new_ts_df.columns) > 0:
+            # Create DataFrame from all columns at once (avoids fragmentation)
+            if len(new_columns) > 0:
+                new_ts_df = pd.DataFrame(new_columns, index=ts_df.index)
                 setattr(network.generators_t, attr, new_ts_df)
                 print(f"[info]   - Aggregated time-series '{attr}' for {len(new_ts_df.columns)} generators")
 
