@@ -46,7 +46,7 @@ def merge_cc_generators(network, config=None):
     rules = config['cc_merge_rules']
     default_rule = rules.get('others', 'p_nom')  # Default for unspecified attributes
 
-    # Find all generators with a cc_group
+    # Find all generators with a cc_group (non-null)
     cc_mask = network.generators['cc_group'].notna()
     if not cc_mask.any():
         print("[info] No CC generators found.")
@@ -62,6 +62,9 @@ def merge_cc_generators(network, config=None):
                      'min_up_time', 'min_down_time', 'up_time_before', 'down_time_before',
                      'ramp_limit_up', 'ramp_limit_down', 'ramp_limit_start_up', 'ramp_limit_shut_down',
                      'build_year', 'lifetime', 'weight', 'max_hours']
+
+    # Store list of merged generators to track what was processed
+    merged_generators_data = {}
 
     # Process each CC group
     for group_name in unique_groups:

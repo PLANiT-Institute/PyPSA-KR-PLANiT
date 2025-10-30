@@ -25,7 +25,18 @@ def load_network(config):
     data_path = config['Base_year']['file_path']
 
     network = pypsa.Network()
+
+    # Import network from CSV folder
+    # PyPSA will use pandas read_csv internally, which already treats empty strings as NaN
+    # by default (keep_default_na=True)
     network.import_from_csv_folder(data_path)
+
+    # Clean up any empty strings that might have slipped through
+    # Convert empty strings to NaN in generators DataFrame
+    if hasattr(network, 'generators') and 'cc_group' in network.generators.columns:
+        # Replace empty strings with NaN
+        network.generators['cc_group'] = network.generators['cc_group'].replace('', pd.NA)
+        network.generators['cc_group'] = network.generators['cc_group'].replace(' ', pd.NA)
 
     print(f"Network loaded from {data_path}")
     return network

@@ -58,7 +58,7 @@ class UtilsGUI:
 
         subtitle_label = ttk.Label(
             title_frame,
-            text="Run any utility tool with a click - 9 tools available",
+            text="Run any utility tool with a click - 10 tools available",
             font=("Helvetica", 10)
         )
         subtitle_label.pack()
@@ -77,6 +77,7 @@ class UtilsGUI:
         self.create_merge_cc_groups_tab()
         self.create_expand_mainland_tab()
         self.create_unique_names_tab()
+        self.create_province_mapper_tab()
 
         # Output console at bottom
         self.create_output_console()
@@ -778,6 +779,135 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
         self.run_in_thread(task)
 
+    def create_province_mapper_tab(self):
+        """Province name mapper tab."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="🗺️ Province Mapper")
+
+        main_frame = ttk.Frame(tab, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="Map province names to standardized official names",
+                 font=("Helvetica", 10, "italic")).pack(pady=5)
+
+        # Mapping file
+        mapping_frame = ttk.LabelFrame(main_frame, text="Mapping File", padding="10")
+        mapping_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(mapping_frame, text="Province Mapping CSV:").grid(row=0, column=0, sticky=tk.W)
+        self.province_mapping_var = tk.StringVar(value="data/others/province_mapping.csv")
+        ttk.Entry(mapping_frame, textvariable=self.province_mapping_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(mapping_frame, text="Browse", command=lambda: self.browse_file(self.province_mapping_var, [("CSV", "*.csv")])).grid(row=0, column=2)
+
+        # Input files
+        input_frame = ttk.LabelFrame(main_frame, text="Input Files", padding="10")
+        input_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(input_frame, text="Input File / Folder:").grid(row=0, column=0, sticky=tk.W)
+        self.province_input_var = tk.StringVar(value="")
+        ttk.Entry(input_frame, textvariable=self.province_input_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(input_frame, text="File", command=lambda: self.browse_file(self.province_input_var, [("CSV", "*.csv")])).grid(row=0, column=2)
+        ttk.Button(input_frame, text="Folder", command=lambda: self.browse_folder(self.province_input_var)).grid(row=0, column=3)
+
+        # Options
+        opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
+        opt_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(opt_frame, text="Column Name:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.province_column_var = tk.StringVar(value="province")
+        ttk.Entry(opt_frame, textvariable=self.province_column_var, width=20).grid(row=0, column=1, padx=5, sticky=tk.W)
+
+        ttk.Label(opt_frame, text="Mapping Direction:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.province_direction_var = tk.StringVar(value="to_short")
+        direction_frame = ttk.Frame(opt_frame)
+        direction_frame.grid(row=1, column=1, sticky=tk.W, pady=2)
+        ttk.Radiobutton(direction_frame, text="To Short (강원특별자치도 → 강원)",
+                       variable=self.province_direction_var, value="to_short").pack(anchor=tk.W)
+        ttk.Radiobutton(direction_frame, text="To Official (강원 → 강원특별자치도)",
+                       variable=self.province_direction_var, value="to_official").pack(anchor=tk.W)
+
+        self.province_backup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="Create backup (.bak)", variable=self.province_backup_var).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
+
+        self.province_recursive_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt_frame, text="Process folders recursively", variable=self.province_recursive_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
+
+        # Info
+        info_frame = ttk.LabelFrame(main_frame, text="Info", padding="10")
+        info_frame.pack(fill=tk.X, pady=5)
+
+        info_text = """This tool maps province names to their official standardized names.
+Example: Maps both "강원특별자치도" and other variants to "강원" (short form).
+Any unmapped province names will be reported for manual addition to mapping file."""
+        ttk.Label(info_frame, text=info_text, font=("Helvetica", 9), foreground="gray", justify=tk.LEFT, wraplength=800).pack(anchor=tk.W)
+
+        ttk.Button(main_frame, text="▶ Map Province Names", command=self.run_province_mapper).pack(pady=10)
+
+    def run_province_mapper(self):
+        """Run province name mapper."""
+        mapping_file = self.province_mapping_var.get()
+        input_path = self.province_input_var.get()
+
+        if not mapping_file or not Path(mapping_file).exists():
+            messagebox.showerror("Error", f"Mapping file not found: {mapping_file}")
+            return
+        if not input_path or not Path(input_path).exists():
+            messagebox.showerror("Error", f"Input path not found: {input_path}")
+            return
+
+        self.status_var.set("Mapping province names...")
+        self.log("\n" + "="*60)
+        self.log("PROVINCE NAME MAPPER")
+        self.log("="*60)
+
+        def task():
+            try:
+                from province_mapper import load_province_mapping, process_file, process_directory
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                # Load mapping
+                direction = self.province_direction_var.get()
+                mapping, _ = load_province_mapping(Path(mapping_file), direction, None, False)
+
+                input_p = Path(input_path)
+                column = self.province_column_var.get()
+                backup = self.province_backup_var.get()
+
+                if input_p.is_file():
+                    # Single file
+                    changes, unmapped = process_file(
+                        input_p, mapping, column, None,
+                        backup, "utf-8-sig", None, False, direction
+                    )
+                    self.log(f"\nTotal changes: {changes}")
+                    if unmapped:
+                        self.log(f"Unmapped names: {len(unmapped)}")
+                else:
+                    # Directory
+                    recursive = self.province_recursive_var.get()
+                    files_processed, total_changes, all_unmapped = process_directory(
+                        input_p, mapping, column, recursive,
+                        backup, "utf-8-sig", None, False, direction
+                    )
+                    self.log(f"\nFiles processed: {files_processed}")
+                    self.log(f"Total changes: {total_changes}")
+                    if all_unmapped:
+                        self.log(f"Unmapped names: {len(all_unmapped)}")
+
+                self.log("\n✓ Province name mapping completed!")
+                self.status_var.set("Province mapping completed")
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Province mapping failed")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
     def run_reverse_geocode(self):
         """Run reverse geocoding."""
         input_file = self.revgeo_input_var.get()
@@ -811,7 +941,28 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
                 except ValueError:
                     timeout = 1
 
-                geocoder = ReverseGeocoder(cache_file=str(cache_path), language=language, timeout=timeout)
+                # Load province mapping
+                province_mapping = None
+                mapping_path = Path(__file__).parent.parent / "data" / "others" / "province_mapping.csv"
+                if mapping_path.exists():
+                    try:
+                        self.log(f"Loading province mapping from: {mapping_path.name}")
+                        import csv
+                        mapping_dict = {}
+                        with open(mapping_path, 'r', encoding='utf-8-sig') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                short = row['short'].strip()
+                                official = row['official'].strip()
+                                # Map both official -> short and short -> short
+                                mapping_dict[official] = short
+                                mapping_dict[short] = short
+                        province_mapping = mapping_dict
+                        self.log(f"  Loaded {len(mapping_dict)} province mapping entries")
+                    except Exception as e:
+                        self.log(f"  Warning: Could not load province mapping: {e}")
+
+                geocoder = ReverseGeocoder(cache_file=str(cache_path), language=language, timeout=timeout, province_mapping=province_mapping)
                 geocoder.process_csv(
                     input_file=input_file,
                     output_file=output_file,

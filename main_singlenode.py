@@ -42,10 +42,10 @@ apply_snapshot_data_to_network(network, config, snapshot_df)
 
 # Define 48-hour snapshot range for optimization
 # Use the first 48 snapshots from the network
-# optimization_snapshots = network.snapshots[:48]
+optimization_snapshots = network.snapshots[:48]
 
 # Run optimization for only the specified snapshots
-# network.optimize() # snapshots=optimization_snapshots
+network.optimize(snapshots=optimization_snapshots) # 
 
 # To do
 # 1. Add a gui function that allows the user to run utils. 

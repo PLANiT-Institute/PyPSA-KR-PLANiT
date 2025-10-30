@@ -97,6 +97,7 @@ def apply_monthly_data_to_network(network, config, monthly_df):
         # Create the DataFrame all at once
         if columns_data:
             attr_df = pd.DataFrame(columns_data, index=snapshots)
+            attr_df.index.name = 'snapshot'
             setattr(component_t, attribute, attr_df)
 
 
@@ -181,4 +182,5 @@ def apply_snapshot_data_to_network(network, config, snapshot_df):
         # Create the DataFrame all at once
         if columns_data:
             attr_df = pd.DataFrame(columns_data, index=snapshots)
+            attr_df.index.name = 'snapshot'
             setattr(component_t, attribute, attr_df)

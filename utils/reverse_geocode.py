@@ -20,7 +20,7 @@ import time
 class ReverseGeocoder:
     """Reverse geocode coordinates to get region information."""
 
-    def __init__(self, cache_file='cache/reverse_geocode_cache.json', user_agent='pypsa_reverse_geocoder', language='en', timeout=1):
+    def __init__(self, cache_file='cache/reverse_geocode_cache.json', user_agent='pypsa_reverse_geocoder', language='en', timeout=1, province_mapping=None):
         """
         Initialize reverse geocoder with caching.
 
@@ -34,10 +34,14 @@ class ReverseGeocoder:
             Language for region names: 'en' (English) or 'ko' (Korean)
         timeout : int
             Request timeout in seconds (default: 1)
+        province_mapping : dict, optional
+            Province mapping dictionary to standardize region_1 names.
+            If provided, will map region_1 to standard short names.
         """
         self.cache_file = cache_file
         self.language = language
         self.timeout = timeout
+        self.province_mapping = province_mapping
 
         # Create cache directory if needed
         cache_dir = Path(cache_file).parent
@@ -66,6 +70,141 @@ class ReverseGeocoder:
         """Save cache to file."""
         with open(self.cache_file, 'w', encoding='utf-8') as f:
             json.dump(self.cache, f, ensure_ascii=False, indent=2)
+
+    def _infer_province_from_city(self, city_name):
+        """
+        Try to infer province from city name when API doesn't provide province.
+        This is a fallback mechanism for Korean locations.
+
+        Parameters:
+        -----------
+        city_name : str
+            City name from geocoding
+
+        Returns:
+        --------
+        str : Inferred province short name, or empty if cannot infer
+        """
+        if not city_name or not self.province_mapping:
+            return ''
+
+        # Major Korean cities and their provinces
+        city_to_province = {
+            # Gyeonggi cities
+            '수원시': '경기', 'Suwon': '경기',
+            '성남시': '경기', 'Seongnam': '경기',
+            '고양시': '경기', 'Goyang': '경기',
+            '용인시': '경기', 'Yongin': '경기',
+            '부천시': '경기', 'Bucheon': '경기',
+            '안산시': '경기', 'Ansan': '경기',
+            '안양시': '경기', 'Anyang': '경기',
+            '남양주시': '경기', 'Namyangju': '경기',
+            '화성시': '경기', 'Hwaseong': '경기',
+            '평택시': '경기', 'Pyeongtaek': '경기',
+            '의정부시': '경기', 'Uijeongbu': '경기',
+            '시흥시': '경기', 'Siheung': '경기',
+            '파주시': '경기', 'Paju': '경기',
+            '김포시': '경기', 'Gimpo': '경기',
+            '광명시': '경기', 'Gwangmyeong': '경기',
+            '광주시': '경기', 'Gwangju': '경기',  # Note: different from Gwangju Metropolitan City
+            '군포시': '경기', 'Gunpo': '경기',
+            '하남시': '경기', 'Hanam': '경기',
+            '오산시': '경기', 'Osan': '경기',
+            '양주시': '경기', 'Yangju': '경기',
+            '이천시': '경기', 'Icheon': '경기',
+            '안성시': '경기', 'Anseong': '경기',
+            '구리시': '경기', 'Guri': '경기',
+            '포천시': '경기', 'Pocheon': '경기',
+            '의왕시': '경기', 'Uiwang': '경기',
+            '양평군': '경기', 'Yangpyeong': '경기',
+            '여주시': '경기', 'Yeoju': '경기',
+            '동두천시': '경기', 'Dongducheon': '경기',
+            '가평군': '경기', 'Gapyeong': '경기',
+            '과천시': '경기', 'Gwacheon': '경기',
+            '연천군': '경기', 'Yeoncheon': '경기',
+
+            # Gangwon cities
+            '춘천시': '강원', 'Chuncheon': '강원',
+            '원주시': '강원', 'Wonju': '강원',
+            '강릉시': '강원', 'Gangneung': '강원',
+            '동해시': '강원', 'Donghae': '강원',
+            '태백시': '강원', 'Taebaek': '강원',
+            '속초시': '강원', 'Sokcho': '강원',
+            '삼척시': '강원', 'Samcheok': '강원',
+
+            # Add more as needed...
+        }
+
+        city_str = str(city_name).strip()
+        if city_str in city_to_province:
+            province_short = city_to_province[city_str]
+            # Return standardized version
+            if province_short in self.province_mapping:
+                return self.province_mapping[province_short]
+
+        return ''
+
+    def _standardize_province(self, province_name):
+        """
+        Standardize province name using province mapping.
+
+        Parameters:
+        -----------
+        province_name : str
+            Raw province name from geocoding
+
+        Returns:
+        --------
+        str : Standardized province name, or original if no mapping found
+        """
+        if not self.province_mapping or not province_name:
+            return province_name
+
+        # Try to find a match in the mapping
+        province_str = str(province_name).strip()
+
+        # Direct match
+        if province_str in self.province_mapping:
+            return self.province_mapping[province_str]
+
+        # Try partial matches for cases like "Gangwon State" -> "강원"
+        # Remove common suffixes
+        for suffix in [' State', ' Province', ' Metropolitan City', ' Special City',
+                      '특별자치도', '광역시', '특별시', '도', '시']:
+            if province_str.endswith(suffix):
+                cleaned = province_str[:-len(suffix)].strip()
+                if cleaned in self.province_mapping:
+                    return self.province_mapping[cleaned]
+
+        # Try English to Korean mapping
+        english_to_korean = {
+            'Seoul': '서울',
+            'Busan': '부산',
+            'Daegu': '대구',
+            'Incheon': '인천',
+            'Gwangju': '광주',
+            'Daejeon': '대전',
+            'Ulsan': '울산',
+            'Sejong': '세종',
+            'Gyeonggi': '경기',
+            'Gangwon': '강원',
+            'North Chungcheong': '충북',
+            'South Chungcheong': '충남',
+            'North Jeolla': '전북',
+            'South Jeolla': '전남',
+            'North Gyeongsang': '경북',
+            'South Gyeongsang': '경남',
+            'Jeju': '제주'
+        }
+
+        # Try English name match
+        for eng, kor in english_to_korean.items():
+            if province_str == eng or province_str.startswith(eng + ' '):
+                if kor in self.province_mapping:
+                    return self.province_mapping[kor]
+
+        # If no match found, return original
+        return province_name
 
     def reverse_geocode(self, x, y):
         """
@@ -106,23 +245,76 @@ class ReverseGeocoder:
             # Extract address components
             address = location.raw['address']
 
-            # Determine level 1 (province/state)
-            level1 = (address.get('province') or
-                     address.get('state') or
-                     address.get('region') or
-                     address.get('city') or '')
+            # Determine level 1 (province/state) - must be province-level only
+            # Priority: state > province > region
+            level1_raw = (address.get('state') or
+                         address.get('province') or
+                         address.get('region') or '')
+
+            # Special cities (Seoul, Busan, etc.) in Korea are considered province-level
+            special_cities = ['Seoul', 'Busan', 'Daegu', 'Incheon', 'Gwangju', 'Daejeon', 'Ulsan', 'Sejong',
+                            '서울', '서울특별시', '부산', '부산광역시', '대구', '대구광역시',
+                            '인천', '인천광역시', '광주', '광주광역시', '대전', '대전광역시',
+                            '울산', '울산광역시', '세종', '세종특별자치시']
+
+            # If no state/province/region found, check if city is a special city
+            if not level1_raw:
+                city = address.get('city', '')
+                # Only use city as level1 if it's a special administrative city
+                if city in special_cities or any(city.startswith(sc) for sc in special_cities if sc):
+                    level1_raw = city
+                else:
+                    # Try to infer province from city name (fallback mechanism)
+                    inferred_province = self._infer_province_from_city(city)
+                    if inferred_province:
+                        print(f"  Info - Inferred province '{inferred_province}' from city '{city}'")
+                        level1_raw = inferred_province
+
+            # Try to standardize province name using mapping
+            level1 = ''
+            if level1_raw:
+                # Check if level1_raw is already a valid province (exists in mapping as key)
+                if self.province_mapping and level1_raw in self.province_mapping:
+                    # It's already a valid province name (short or official)
+                    level1 = self.province_mapping[level1_raw]
+                else:
+                    # Try to standardize using the mapping
+                    level1 = self._standardize_province(level1_raw)
+                    # If standardization didn't change the value and mapping exists,
+                    # it means we couldn't find a match in the mapping
+                    if self.province_mapping and level1 == level1_raw:
+                        # Check if it looks like a province-level entity
+                        if any(suffix in level1_raw for suffix in ['State', 'Province', '도', '특별시', '광역시', '특별자치도']):
+                            # Keep it as is - it's clearly a province
+                            pass
+                        else:
+                            # Not clearly a province and not in mapping - leave region_1 empty
+                            level1 = ''
+                            level1_raw = ''
 
             # Determine level 2 (county/city/district)
-            level2 = (address.get('county') or
-                     address.get('city') or
-                     address.get('municipality') or
-                     address.get('district') or
-                     address.get('town') or '')
-
-            # For special cities like Seoul (서울특별시), if level1 is the city,
-            # use district/suburb as level2
-            if level1 == address.get('city') and not level2:
-                level2 = address.get('district') or address.get('suburb') or ''
+            # Strategy: region_1 = province level, region_2 = city/county/district level
+            if not level1:
+                # No province found - put city/county in region_2, leave region_1 empty
+                level2 = (address.get('city') or
+                         address.get('county') or
+                         address.get('municipality') or
+                         address.get('district') or
+                         address.get('town') or
+                         address.get('village') or '')
+            elif address.get('city') in special_cities or any(sc in str(level1_raw) for sc in special_cities if sc):
+                # Special city case: use district/suburb/county for level2
+                level2 = (address.get('district') or
+                         address.get('suburb') or
+                         address.get('county') or
+                         address.get('town') or '')
+            else:
+                # Regular province case: use city/county for level2
+                level2 = (address.get('city') or
+                         address.get('county') or
+                         address.get('municipality') or
+                         address.get('district') or
+                         address.get('town') or '')
 
             # Build result with only 2 administrative levels
             result = {
@@ -332,11 +524,39 @@ Notes:
                        help='API request timeout in seconds (default: 1)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Process only first 10 rows for testing')
+    parser.add_argument('--province-mapping', default='data/others/province_mapping.csv',
+                       help='Province mapping file to standardize region_1 names (default: data/others/province_mapping.csv)')
 
     args = parser.parse_args()
 
-    # Create geocoder
-    geocoder = ReverseGeocoder(cache_file=args.cache_file, language=args.language, timeout=args.timeout)
+    # Load province mapping if file exists
+    province_mapping = None
+    if Path(args.province_mapping).exists():
+        try:
+            print(f"\nLoading province mapping from: {args.province_mapping}")
+            import csv
+            mapping_dict = {}
+            with open(args.province_mapping, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    short = row['short'].strip()
+                    official = row['official'].strip()
+                    # Map both official -> short and short -> short
+                    mapping_dict[official] = short
+                    mapping_dict[short] = short
+            province_mapping = mapping_dict
+            print(f"  Loaded {len(mapping_dict)} province mapping entries")
+        except Exception as e:
+            print(f"  Warning: Could not load province mapping: {e}")
+            print(f"  Continuing without province mapping...")
+
+    # Create geocoder with province mapping
+    geocoder = ReverseGeocoder(
+        cache_file=args.cache_file,
+        language=args.language,
+        timeout=args.timeout,
+        province_mapping=province_mapping
+    )
 
     # Process file
     success = geocoder.process_csv(
