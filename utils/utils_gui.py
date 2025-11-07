@@ -33,14 +33,98 @@ class UtilsGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("PyPSA Utilities - All Tools")
-        self.root.geometry("1000x750")
+        self.root.geometry("1200x800")  # Increased width for left sidebar
 
         # Store original stdout/stderr
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
+        # Store tabs for custom tab system
+        self.tabs = {}
+        self.current_tab = None
+
         # Create widgets
         self.create_widgets()
+
+    def create_scrollable_frame(self, parent):
+        """Create a scrollable frame for tab content."""
+        # Create canvas and scrollbar
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack scrollbar and canvas
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Enable mousewheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind('<Enter>', _bind_to_mousewheel)
+        canvas.bind('<Leave>', _unbind_from_mousewheel)
+
+        return scrollable_frame
+
+    def add_tab(self, name, icon, frame):
+        """Add a tab with a sidebar button."""
+        # Create button in sidebar
+        btn = tk.Button(
+            self.sidebar_frame,
+            text=f"{icon} {name}",
+            command=lambda: self.show_tab(name),
+            relief=tk.FLAT,
+            anchor=tk.W,
+            padx=15,
+            pady=8,
+            font=("Helvetica", 10),
+            bg="#f0f0f0",
+            activebackground="#e0e0e0",
+            cursor="hand2",
+            width=20
+        )
+        btn.pack(fill=tk.X, padx=5, pady=2)
+
+        # Store tab info
+        self.tabs[name] = {
+            'frame': frame,
+            'button': btn
+        }
+
+    def show_tab(self, name):
+        """Show the selected tab and hide others."""
+        # Hide current tab
+        if self.current_tab and self.current_tab in self.tabs:
+            self.tabs[self.current_tab]['frame'].pack_forget()
+            self.tabs[self.current_tab]['button'].config(
+                relief=tk.FLAT,
+                bg="#f0f0f0",
+                font=("Helvetica", 10)
+            )
+
+        # Show new tab
+        if name in self.tabs:
+            self.tabs[name]['frame'].pack(fill=tk.BOTH, expand=True)
+            self.tabs[name]['button'].config(
+                relief=tk.SUNKEN,
+                bg="#d0d0d0",
+                font=("Helvetica", 10, "bold")
+            )
+            self.current_tab = name
 
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -58,16 +142,46 @@ class UtilsGUI:
 
         subtitle_label = ttk.Label(
             title_frame,
-            text="Run any utility tool with a click - 10 tools available",
+            text="Run any utility tool with a click - 11 tools available",
             font=("Helvetica", 10)
         )
         subtitle_label.pack()
 
-        # Create notebook (tabs)
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create main container with sidebar and content
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # Create tabs for all utilities
+        # Left sidebar for tab buttons
+        sidebar = ttk.Frame(main_container, relief=tk.RAISED, borderwidth=1)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+
+        # Sidebar title
+        sidebar_title = ttk.Label(sidebar, text="Tools", font=("Helvetica", 12, "bold"))
+        sidebar_title.pack(pady=10, padx=10)
+
+        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=5, pady=5)
+
+        # Scrollable sidebar content
+        sidebar_canvas = tk.Canvas(sidebar, width=180, highlightthickness=0)
+        sidebar_scrollbar = ttk.Scrollbar(sidebar, orient="vertical", command=sidebar_canvas.yview)
+        self.sidebar_frame = ttk.Frame(sidebar_canvas)
+
+        self.sidebar_frame.bind(
+            "<Configure>",
+            lambda e: sidebar_canvas.configure(scrollregion=sidebar_canvas.bbox("all"))
+        )
+
+        sidebar_canvas.create_window((0, 0), window=self.sidebar_frame, anchor="nw")
+        sidebar_canvas.configure(yscrollcommand=sidebar_scrollbar.set)
+
+        sidebar_scrollbar.pack(side="right", fill="y")
+        sidebar_canvas.pack(side="left", fill="both", expand=True)
+
+        # Right side: content area
+        self.content_frame = ttk.Frame(main_container)
+        self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Create tabs (this will add buttons to sidebar and create hidden frames)
         self.create_geocoding_tab()
         self.create_reverse_geocode_tab()
         self.create_download_tab()
@@ -78,6 +192,12 @@ class UtilsGUI:
         self.create_expand_mainland_tab()
         self.create_unique_names_tab()
         self.create_province_mapper_tab()
+        self.create_fill_missing_tab()
+
+        # Show first tab by default
+        if self.tabs:
+            first_tab = list(self.tabs.keys())[0]
+            self.show_tab(first_tab)
 
         # Output console at bottom
         self.create_output_console()
@@ -89,18 +209,16 @@ class UtilsGUI:
 
     def create_geocoding_tab(self):
         """Geocoding utility tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="📍 Geocoding")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Geocoding", "📍", tab)
 
         ttk.Label(main_frame, text="Add geographic coordinates (x, y) to CSV files",
-                 font=("Helvetica", 10, "italic")).pack(pady=5)
+                 font=("Helvetica", 10, "italic")).pack(pady=5, padx=10)
 
         # Input settings
         frame = ttk.LabelFrame(main_frame, text="Input Settings", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="CSV Folder:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.geo_folder_var = tk.StringVar(value="data/2024")
@@ -113,7 +231,7 @@ class UtilsGUI:
 
         # Options
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         self.geo_overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="Overwrite existing", variable=self.geo_overwrite_var).pack(anchor=tk.W)
@@ -129,18 +247,16 @@ class UtilsGUI:
 
     def create_reverse_geocode_tab(self):
         """Reverse geocoding utility tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🔍 Reverse Geocode")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Reverse Geocode", "🔍", tab)
 
         ttk.Label(main_frame, text="Get region names from coordinates (country, province, city, etc.)",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         # File settings
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.revgeo_input_var = tk.StringVar(value="")
@@ -154,7 +270,7 @@ class UtilsGUI:
 
         # Column settings
         col_frame = ttk.LabelFrame(main_frame, text="Coordinate Columns", padding="10")
-        col_frame.pack(fill=tk.X, pady=5)
+        col_frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(col_frame, text="Longitude Column:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.revgeo_x_var = tk.StringVar(value="x")
@@ -166,7 +282,7 @@ class UtilsGUI:
 
         # Options
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         self.revgeo_overwrite_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="Overwrite existing region info", variable=self.revgeo_overwrite_var).pack(anchor=tk.W)
@@ -193,7 +309,7 @@ class UtilsGUI:
 
         # Info about output
         info_frame = ttk.LabelFrame(main_frame, text="Output Columns Added", padding="10")
-        info_frame.pack(fill=tk.X, pady=5)
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
 
         info_text = """region_1: Province/State (e.g., Gangwon State, 강원도, Seoul, 서울특별시)
 region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천구)"""
@@ -203,18 +319,16 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_download_tab(self):
         """Network download utility tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🌍 Network Download")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Network Download", "🌍", tab)
 
         ttk.Label(main_frame, text="Download power network data from OpenStreetMap",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         # Country
         frame = ttk.LabelFrame(main_frame, text="Country Settings", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Country Code:").grid(row=0, column=0, sticky=tk.W)
         self.dl_country_var = tk.StringVar(value="KR")
@@ -229,7 +343,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
         # Options
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(opt_frame, text="Min Voltage (kV):").grid(row=0, column=0, sticky=tk.W)
         self.dl_voltage_var = tk.StringVar(value="220")
@@ -243,17 +357,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_csv_to_excel_tab(self):
         """CSV to Excel converter tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="📊 CSV→Excel")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("CSV→Excel", "📊", tab)
 
         ttk.Label(main_frame, text="Convert CSV files to Excel format",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input CSV / Folder:").grid(row=0, column=0, sticky=tk.W)
         self.csv_input_var = tk.StringVar(value="")
@@ -270,17 +382,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_encoding_converter_tab(self):
         """Encoding converter tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🔤 Encoding")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Encoding", "🔤", tab)
 
         ttk.Label(main_frame, text="Convert file encoding from EUC-KR/CP949 to UTF-8",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File / Folder:").grid(row=0, column=0, sticky=tk.W)
         self.enc_input_var = tk.StringVar(value="")
@@ -289,7 +399,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
         ttk.Button(frame, text="Folder", command=lambda: self.browse_folder(self.enc_input_var)).grid(row=0, column=3)
 
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         self.enc_backup_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(opt_frame, text="Create backup (.bak)", variable=self.enc_backup_var).pack(anchor=tk.W)
@@ -298,17 +408,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_add_cc_groups_tab(self):
         """Add CC groups tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="⚡ Add CC Groups")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Add CC Groups", "⚡", tab)
 
         ttk.Label(main_frame, text="Add combined cycle (CC) group names to generators.csv",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W)
         self.addcc_input_var = tk.StringVar(value="data/2024/generators.csv")
@@ -316,7 +424,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
         ttk.Button(frame, text="Browse", command=lambda: self.browse_file(self.addcc_input_var, [("CSV", "*.csv")])).grid(row=0, column=2)
 
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         self.addcc_backup_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(opt_frame, text="Create backup", variable=self.addcc_backup_var).pack(anchor=tk.W)
@@ -325,17 +433,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_merge_cc_groups_tab(self):
         """Merge CC groups tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🔗 Merge CC")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Merge CC", "🔗", tab)
 
         ttk.Label(main_frame, text="Merge CC generators by group (combine GT + ST into single unit)",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W)
         self.mergecc_input_var = tk.StringVar(value="data/2024/generators.csv")
@@ -350,17 +456,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_expand_mainland_tab(self):
         """Expand mainland data tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🗺️ Expand Mainland")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Expand Mainland", "🗺️", tab)
 
         ttk.Label(main_frame, text="Expand mainland (육지) data to individual provinces",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W)
         self.expand_input_var = tk.StringVar(value="")
@@ -375,17 +479,15 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_unique_names_tab(self):
         """Make names unique tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🏷️ Unique Names")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Unique Names", "🏷️", tab)
 
         ttk.Label(main_frame, text="Make 'name' column unique by adding _1, _2 suffixes",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
-        frame.pack(fill=tk.X, pady=5)
+        frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(frame, text="Input File:").grid(row=0, column=0, sticky=tk.W)
         self.unique_input_var = tk.StringVar(value="")
@@ -393,7 +495,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
         ttk.Button(frame, text="Browse", command=lambda: self.browse_file(self.unique_input_var, [("CSV", "*.csv")])).grid(row=0, column=2)
 
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         self.unique_backup_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(opt_frame, text="Create backup", variable=self.unique_backup_var).pack(anchor=tk.W)
@@ -781,18 +883,16 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
     def create_province_mapper_tab(self):
         """Province name mapper tab."""
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🗺️ Province Mapper")
-
-        main_frame = ttk.Frame(tab, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Province Mapper", "🗺️", tab)
 
         ttk.Label(main_frame, text="Map province names to standardized official names",
                  font=("Helvetica", 10, "italic")).pack(pady=5)
 
         # Mapping file
         mapping_frame = ttk.LabelFrame(main_frame, text="Mapping File", padding="10")
-        mapping_frame.pack(fill=tk.X, pady=5)
+        mapping_frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(mapping_frame, text="Province Mapping CSV:").grid(row=0, column=0, sticky=tk.W)
         self.province_mapping_var = tk.StringVar(value="data/others/province_mapping.csv")
@@ -801,7 +901,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
         # Input files
         input_frame = ttk.LabelFrame(main_frame, text="Input Files", padding="10")
-        input_frame.pack(fill=tk.X, pady=5)
+        input_frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(input_frame, text="Input File / Folder:").grid(row=0, column=0, sticky=tk.W)
         self.province_input_var = tk.StringVar(value="")
@@ -811,7 +911,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
         # Options
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
 
         ttk.Label(opt_frame, text="Column Name:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.province_column_var = tk.StringVar(value="province")
@@ -834,7 +934,7 @@ region_2: County/City/District (e.g., Taebaek-si, 평창군, Gangnam-gu, 양천�
 
         # Info
         info_frame = ttk.LabelFrame(main_frame, text="Info", padding="10")
-        info_frame.pack(fill=tk.X, pady=5)
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
 
         info_text = """This tool maps province names to their official standardized names.
 Example: Maps both "강원특별자치도" and other variants to "강원" (short form).
@@ -979,6 +1079,150 @@ Any unmapped province names will be reported for manual addition to mapping file
                 import traceback
                 self.log(traceback.format_exc())
                 self.status_var.set("Reverse geocoding failed")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
+    def create_fill_missing_tab(self):
+        """Fill missing values utility tab."""
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Fill Missing", "📊", tab)
+
+        ttk.Label(main_frame, text="Fill missing values in CSV columns using intelligent imputation",
+                 font=("Helvetica", 10, "italic")).pack(pady=5)
+
+        # Files
+        file_frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
+        file_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(file_frame, text="Input File:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.fillmiss_input_var = tk.StringVar(value="data/Singlenode2024/generators.csv")
+        ttk.Entry(file_frame, textvariable=self.fillmiss_input_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(file_frame, text="Browse", command=lambda: self.browse_file(self.fillmiss_input_var, [("CSV", "*.csv")])).grid(row=0, column=2)
+
+        ttk.Label(file_frame, text="Output File:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.fillmiss_output_var = tk.StringVar(value="")
+        ttk.Entry(file_frame, textvariable=self.fillmiss_output_var, width=50).grid(row=1, column=1, padx=5)
+        ttk.Label(file_frame, text="(Leave empty to overwrite input)", font=("Helvetica", 8), foreground="gray").grid(row=1, column=2, sticky=tk.W)
+
+        # Column settings
+        col_frame = ttk.LabelFrame(main_frame, text="Column Settings", padding="10")
+        col_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(col_frame, text="Target Column (to fill):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.fillmiss_target_var = tk.StringVar(value="capital_cost")
+        ttk.Entry(col_frame, textvariable=self.fillmiss_target_var, width=30).grid(row=0, column=1, padx=5, sticky=tk.W)
+
+        ttk.Label(col_frame, text="Grouping Columns:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.fillmiss_groups_var = tk.StringVar(value="build_year,type,carrier")
+        ttk.Entry(col_frame, textvariable=self.fillmiss_groups_var, width=30).grid(row=1, column=1, padx=5, sticky=tk.W)
+        ttk.Label(col_frame, text="(comma-separated)", font=("Helvetica", 8), foreground="gray").grid(row=1, column=2, sticky=tk.W)
+
+        # Method
+        method_frame = ttk.LabelFrame(main_frame, text="Imputation Method", padding="10")
+        method_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        self.fillmiss_method_var = tk.StringVar(value="regression")
+
+        methods = [
+            ("regression", "Regression (predicts based on grouping variables)"),
+            ("group_mean", "Group Mean (simple, fast, robust)"),
+            ("group_median", "Group Median (robust to outliers)"),
+            ("forward_fill", "Forward Fill (propagate last known value)"),
+            ("backward_fill", "Backward Fill (propagate next known value)")
+        ]
+
+        for i, (value, label) in enumerate(methods):
+            ttk.Radiobutton(method_frame, text=label, variable=self.fillmiss_method_var, value=value).grid(
+                row=i, column=0, sticky=tk.W, pady=1, padx=10
+            )
+
+        # Options
+        opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
+        opt_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        self.fillmiss_nonneg_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="Non-negative constraint (ensure no negative values)",
+                       variable=self.fillmiss_nonneg_var).pack(anchor=tk.W, pady=2)
+
+        self.fillmiss_backup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opt_frame, text="Create backup file",
+                       variable=self.fillmiss_backup_var).pack(anchor=tk.W, pady=2)
+
+        # Info
+        info_frame = ttk.LabelFrame(main_frame, text="How It Works", padding="10")
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        info_text = """Example: Fill missing capital_cost using (build_year, type, carrier)
+• Regression: Predicts values based on patterns in the data
+• Group Mean/Median: Uses average of similar groups
+• Non-negative: Ensures physical constraints (e.g., costs can't be negative)
+• Automatic fallback: Falls back to simpler methods if needed"""
+        ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray",
+                 justify=tk.LEFT, wraplength=800).pack(anchor=tk.W)
+
+        ttk.Button(main_frame, text="▶ Fill Missing Values", command=self.run_fill_missing).pack(pady=10)
+
+    def run_fill_missing(self):
+        """Run fill missing values."""
+        input_file = self.fillmiss_input_var.get()
+        output_file = self.fillmiss_output_var.get()
+        target_col = self.fillmiss_target_var.get()
+        groups_str = self.fillmiss_groups_var.get()
+
+        if not input_file or not Path(input_file).exists():
+            messagebox.showerror("Error", f"Input file not found: {input_file}")
+            return
+
+        if not target_col:
+            messagebox.showerror("Error", "Please specify target column")
+            return
+
+        if not groups_str:
+            messagebox.showerror("Error", "Please specify grouping columns")
+            return
+
+        # Parse grouping columns
+        grouping_cols = [c.strip() for c in groups_str.split(',')]
+
+        if not output_file:
+            output_file = None
+
+        self.status_var.set("Filling missing values...")
+        self.log("\n" + "="*60)
+        self.log("FILL MISSING VALUES")
+        self.log("="*60)
+
+        def task():
+            try:
+                from fill_missing_values import MissingValueFiller
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                filler = MissingValueFiller(verbose=True)
+                stats = filler.process_file(
+                    input_file=input_file,
+                    output_file=output_file,
+                    target_column=target_col,
+                    grouping_columns=grouping_cols,
+                    method=self.fillmiss_method_var.get(),
+                    non_negative=self.fillmiss_nonneg_var.get(),
+                    predictor_columns=None,
+                    backup=self.fillmiss_backup_var.get()
+                )
+
+                self.log(f"\n✓ Fill missing values completed!")
+                self.log(f"  Filled: {stats['filled_count']} values")
+                self.log(f"  Remaining missing: {stats['remaining_missing']}")
+                self.status_var.set("Fill missing values completed")
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Fill missing values failed")
             finally:
                 sys.stdout = self.original_stdout
                 sys.stderr = self.original_stderr
