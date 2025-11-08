@@ -4,12 +4,12 @@
 # Maps network component carrier names to data file carrier names
 carrier_mapping:
   # Fossil fuels
-  bituminous: bituminous
-  anthracite: anthracite
+  bituminous: coal
+  anthracite: coal
   oil: oil
   "heavy oil": oil
   diesel: oil
-  LNG: LNG
+  LNG: gas
 
   # Nuclear
   nuclear: nuclear
@@ -19,14 +19,14 @@ carrier_mapping:
   solar: solar
   wind: wind
   hydro: hydro
-  ocean: ocean
+  ocean: others
   PSH: PSH
 
   # Others
-  miscellaneous: miscellaneous
-  fuelcell: fuelcell
-  IGCC: IGCC
-  waste: waste
+  miscellaneous: others
+  fuelcell: others
+  IGCC: others
+  waste: others
 
 # Monthly time-series data file path
 monthly_data:
@@ -43,7 +43,7 @@ regional_settings:
 # Base data file path
 Base_year:
   year: 2024
-  file_path: "data/Provincenode2024"
+  file_path: "data/Singlenode2024"
 
 # Modelling years (list of years to analyze)
 Years:

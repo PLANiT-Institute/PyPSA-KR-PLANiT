@@ -210,7 +210,7 @@ def _aggregate_buses_by_region(network, region_column, regions):
     print(f"[info] Created {len(regions)} regional buses")
 
 
-def _map_generators_to_regional_buses(network, region_column):
+def _map_generators_to_regional_buses(network, region_column, province_mapping):
     """Map generators from old buses to regional buses based on province column."""
     print(f"[info] Mapping {len(network.generators)} generators to regional buses...")
 
@@ -220,10 +220,15 @@ def _map_generators_to_regional_buses(network, region_column):
     for gen_name in network.generators.index:
         if region_column in network.generators.columns:
             region = network.generators.loc[gen_name, region_column]
-            if pd.notna(region) and region in network.buses.index:
-                # Set the generator's bus to the regional bus
-                network.generators.loc[gen_name, 'bus'] = region
-                mapped_count += 1
+            if pd.notna(region):
+                # Standardize region name using mapping
+                standardized_region = standardize_region_name(region, province_mapping)
+                if standardized_region in network.buses.index:
+                    # Set the generator's bus to the regional bus
+                    network.generators.loc[gen_name, 'bus'] = standardized_region
+                    mapped_count += 1
+                else:
+                    unmapped_count += 1
             else:
                 unmapped_count += 1
         else:
@@ -654,31 +659,31 @@ def aggregate_network_by_region(network, config):
     # Step 2: Create bus-to-region mapping (BEFORE removing old buses)
     bus_to_region, regions = _create_bus_to_region_mapping(network, region_column)
 
-    # Step 3: Update all components to reference regional buses
-    # (MUST be done before removing old buses)
+    # Step 3: Create regional buses FIRST (so components can reference them)
+    _aggregate_buses_by_region(network, region_column, regions)
 
-    # Step 3a: Map generators to regional buses
-    _map_generators_to_regional_buses(network, region_column)
+    # Step 4: Update all components to reference regional buses
+    # (MUST be done after creating regional buses)
 
-    # Step 3b: Aggregate lines by region pairs (updates bus references)
+    # Step 4a: Map generators to regional buses
+    _map_generators_to_regional_buses(network, region_column, province_mapping)
+
+    # Step 4b: Aggregate lines by region pairs (updates bus references)
     if len(network.lines) > 0:
         _aggregate_lines_by_region(network, region_column,
                                    regional_config.get('lines', {}),
                                    bus_to_region)
 
-    # Step 3c: Aggregate links by region pairs (updates bus references)
+    # Step 4c: Aggregate links by region pairs (updates bus references)
     if len(network.links) > 0:
         _aggregate_links_by_region(network, region_column,
                                    regional_config.get('links', {}),
                                    bus_to_region)
 
-    # Step 4: Now aggregate buses by region (removes old buses, creates regional buses)
-    _aggregate_buses_by_region(network, region_column, regions)
-
     # Step 5: Optionally aggregate generators by carrier and region
     if regional_config.get('aggregate_generators_by_carrier', False):
         from libs.aggregators import aggregate_generators_by_carrier_and_region
-        network = aggregate_generators_by_carrier_and_region(network, config, region_column)
+        network = aggregate_generators_by_carrier_and_region(network, config, region_column, province_mapping)
 
     # Step 6: Create regional loads
     _create_regional_loads(network, region_column, demand_file,

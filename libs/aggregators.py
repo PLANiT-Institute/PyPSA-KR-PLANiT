@@ -6,7 +6,29 @@ Aggregates generators by carrier or other grouping attributes using config rules
 
 import pandas as pd
 
-def aggregate_generators_by_carrier_and_region(network, config=None, region_column=None):
+
+def _standardize_region_name(region_name, province_mapping):
+    """
+    Standardize region name using province mapping.
+
+    Parameters:
+    -----------
+    region_name : str
+        Original region name
+    province_mapping : dict or None
+        Province mapping dictionary
+
+    Returns:
+    --------
+    str : Standardized region name
+    """
+    if not province_mapping or pd.isna(region_name):
+        return region_name
+
+    region_str = str(region_name).strip()
+    return province_mapping.get(region_str, region_str)
+
+def aggregate_generators_by_carrier_and_region(network, config=None, region_column=None, province_mapping=None):
     """
     Aggregate generators by carrier and region using config rules.
 
@@ -24,7 +46,7 @@ def aggregate_generators_by_carrier_and_region(network, config=None, region_colu
     - mean: mean()
     - p_nom: use value from generator with largest p_nom
     - carrier: use the carrier value itself
-    - region: use the region value itself
+    - region: use the region value itself (uses standardized short name for bus)
     - remove: remove this attribute from the merged generator
     - others: default rule for unspecified attributes
 
@@ -36,6 +58,8 @@ def aggregate_generators_by_carrier_and_region(network, config=None, region_colu
         Configuration with generator_region_aggregator_rules
     region_column : str or None
         Column name to use for region grouping (default: None for carrier-only aggregation)
+    province_mapping : dict or None
+        Mapping from full province names to short names (for standardizing bus names)
 
     Returns:
     --------
@@ -146,10 +170,11 @@ def aggregate_generators_by_carrier_and_region(network, config=None, region_colu
             if rule == 'carrier':
                 merged_attrs[col] = carrier
             elif rule == 'region':
-                # Special: if attribute is 'bus', connect to regional bus
+                # Special: if attribute is 'bus', connect to regional bus using standardized name
                 # Otherwise, use the region value itself
                 if col == 'bus':
-                    merged_attrs[col] = region
+                    # Use standardized short name for bus (e.g., '강원' instead of '강원특별자치도')
+                    merged_attrs[col] = _standardize_region_name(region, province_mapping)
                 else:
                     merged_attrs[col] = region
             elif rule == 'p_nom':

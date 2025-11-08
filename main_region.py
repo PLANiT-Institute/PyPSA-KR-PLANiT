@@ -31,13 +31,12 @@ from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
 from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network
 from libs.cc_merger import merge_cc_generators
 from libs.region_aggregator import aggregate_network_by_region
-from libs.aggregators import aggregate_generators_by_carrier_and_region
 # ============================================================================
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
 # Path to config file
-config_path = 'config/config.yaml'
+config_path = 'config/config_province.yaml'
 
 # ============================================================================
 # MAIN EXECUTION
@@ -49,18 +48,33 @@ network = load_network(config)
 
 network = merge_cc_generators(network, config)
 
+# Load and apply monthly data (uses original carrier names from data files)
 monthly_df = load_monthly_data(config)
-apply_monthly_data_to_network(network, config, monthly_df)
+network = apply_monthly_data_to_network(network, config, monthly_df)
 
+# Load and apply snapshot data (uses original carrier names from data files)
 snapshot_df = load_snapshot_data(config)
-apply_snapshot_data_to_network(network, config, snapshot_df)
+network = apply_snapshot_data_to_network(network, config, snapshot_df)
 
+# Aggregate network by region (uses original carrier names)
 network = aggregate_network_by_region(network, config)
 
 # Optional: Aggregate generators by carrier and region
 # This creates one generator per (carrier, region) combination
-# Uncomment to use independently of regional aggregation setting in config:
-network = aggregate_generators_by_carrier_and_region(network, config, region_column='province')
+# NOTE: This is already done inside aggregate_network_by_region() if config has:
+#       regional_aggregation.aggregate_generators_by_carrier: true
+# Only uncomment below if you disabled it in config but want to run it manually:
+# from libs.region_aggregator import load_province_mapping
+# province_mapping = load_province_mapping(config['regional_aggregation']['province_mapping_file'])
+# network = aggregate_generators_by_carrier_and_region(network, config, region_column='province', province_mapping=province_mapping)
+
+# IMPORTANT: Standardize carrier names at the END, just before optimization
+#
+# This is the FINAL step before optimization. All data import/processing uses original
+# carrier names, then we standardize everything at once for clean, consistent network.
+from libs.cost_mapping import standardize_carrier_names
+carrier_mapping = config.get('carrier_mapping', {})
+network = standardize_carrier_names(network, carrier_mapping)
 
 # Define 48-hour snapshot range for optimization
 optimization_snapshots = network.snapshots[:48]
