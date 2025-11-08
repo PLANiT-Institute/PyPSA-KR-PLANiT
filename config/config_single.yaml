@@ -70,3 +70,20 @@ cc_merge_rules:
   #   - sum: Sum all values
   #   - mean: Average of all values
   #   - remove: Remove this attribute from merged generator
+
+generator_attributes:
+  gas:
+    p_min_pu: 0.2
+    p_max_pu: 1.0
+  coal:
+    p_min_pu: 0.2
+    p_max_pu: 1.0
+  oil:
+    p_min_pu: 0.2
+    p_max_pu: 1.0
+  nuclear:
+    p_min_pu: 0.6
+    p_max_pu: 1.0
+  hydro:
+    p_min_pu: 0.2
+    p_max_pu: 1.0

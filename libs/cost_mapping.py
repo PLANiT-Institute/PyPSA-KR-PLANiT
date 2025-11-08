@@ -103,6 +103,55 @@ def standardize_carrier_names(network, carrier_mapping):
     return network
 
 
+def apply_generator_attributes(network, generator_attributes):
+    """
+    Apply carrier-specific attributes to generators from config.
+
+    This should be called AFTER standardize_carrier_names() so that generators
+    have the new standardized carrier names.
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        PyPSA network object (modified in place)
+    generator_attributes : dict
+        Dictionary mapping carrier names to their attributes
+        Example:
+        {
+            'gas': {'p_min_pu': 0.2, 'p_max_pu': 1.0},
+            'coal': {'p_min_pu': 0.2, 'p_max_pu': 1.0}
+        }
+
+    Returns:
+    --------
+    pypsa.Network : The modified network (same object as input)
+    """
+    if not generator_attributes:
+        print("[warn] No generator_attributes provided, skipping")
+        return network
+
+    print(f"[info] Applying carrier-specific generator attributes...")
+
+    updated_count = 0
+    for carrier, attributes in generator_attributes.items():
+        # Find generators with this carrier
+        carrier_gens = network.generators[network.generators['carrier'] == carrier].index
+
+        if len(carrier_gens) == 0:
+            print(f"[info] No generators found for carrier '{carrier}', skipping")
+            continue
+
+        print(f"[info] Applying attributes to {len(carrier_gens)} {carrier} generators:")
+        for attr, value in attributes.items():
+            # Apply the attribute to all generators of this carrier
+            network.generators.loc[carrier_gens, attr] = value
+            print(f"  - {attr} = {value}")
+            updated_count += 1
+
+    print(f"[info] Applied {updated_count} attribute updates")
+    return network
+
+
 def apply_monthly_data_to_network(network, config, monthly_df):
     """
     Apply monthly data to network components dynamically.

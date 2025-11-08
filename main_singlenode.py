@@ -1,6 +1,6 @@
 from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
-from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names
+from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names, apply_generator_attributes
 from libs.cc_merger import merge_cc_generators
 import matplotlib.pyplot as plt
 
@@ -51,6 +51,11 @@ network = apply_snapshot_data_to_network(network, config, snapshot_df)
 # carrier names, then we standardize everything at once for clean, consistent network.
 carrier_mapping = config.get('carrier_mapping', {})
 network = standardize_carrier_names(network, carrier_mapping)
+
+# Apply carrier-specific generator attributes (AFTER carrier standardization)
+# This sets p_min_pu, p_max_pu, etc. for each carrier type from config
+generator_attributes = config.get('generator_attributes', {})
+network = apply_generator_attributes(network, generator_attributes)
 
 # Define 48-hour snapshot range for optimization
 # Use the first 48 snapshots from the network
