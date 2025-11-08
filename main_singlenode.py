@@ -2,7 +2,8 @@ from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
 from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names, apply_generator_attributes
 from libs.cc_merger import merge_cc_generators
-import matplotlib.pyplot as plt
+import plotly.express as px
+import pandas as pd
 
 """
 Main function to run the single node analysis for all modelling years.
@@ -43,6 +44,8 @@ network = apply_monthly_data_to_network(network, config, monthly_df)
 snapshot_df = load_snapshot_data(config)
 network = apply_snapshot_data_to_network(network, config, snapshot_df)
 
+network.generators_t.marginal_cost = network.generators_t.fuel_cost
+
 # Network is already single node - no bus mapping needed
 
 # IMPORTANT: Standardize carrier names at the END, just before optimization
@@ -64,16 +67,31 @@ optimization_snapshots = network.snapshots[:48]
 # Run optimization for only the specified snapshots
 network.optimize(snapshots=optimization_snapshots)
 
-# Display stacked area chart of generation by carrier
-ax = network.generators_t.p.iloc[:48].groupby(network.generators.carrier, axis=1).sum().plot.area(
-    figsize=(12, 6),
-    title='Generation by Carrier',
-    xlabel='Time',
-    ylabel='Power (MW)',
-    legend=True
+# Display interactive stacked area chart of generation by carrier
+gen_by_carrier = network.generators_t.p.iloc[:48].groupby(network.generators.carrier, axis=1).sum()
+
+# Convert to long format for Plotly
+gen_data = gen_by_carrier.reset_index().melt(id_vars='snapshot', var_name='Carrier', value_name='Power (MW)')
+
+# Create interactive area chart
+fig = px.area(
+    gen_data,
+    x='snapshot',
+    y='Power (MW)',
+    color='Carrier',
+    title='Generation by Carrier (Interactive)',
+    labels={'snapshot': 'Time'},
+    hover_data={'Power (MW)': ':.0f'}
 )
-plt.tight_layout()
-plt.show()
+
+fig.update_layout(
+    hovermode='x unified',
+    height=600,
+    xaxis_title='Time',
+    yaxis_title='Power (MW)'
+)
+
+fig.show()
 
 # To do
 # 1. Add a gui function that allows the user to run utils. 
