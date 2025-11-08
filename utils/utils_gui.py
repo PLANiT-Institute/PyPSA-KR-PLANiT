@@ -1131,6 +1131,8 @@ Any unmapped province names will be reported for manual addition to mapping file
             ("regression", "Regression (predicts based on grouping variables)"),
             ("group_mean", "Group Mean (simple, fast, robust)"),
             ("group_median", "Group Median (robust to outliers)"),
+            ("recent_mean", "Recent Mean (mean of values from nearby years)"),
+            ("recent_median", "Recent Median (median of values from nearby years)"),
             ("forward_fill", "Forward Fill (propagate last known value)"),
             ("backward_fill", "Backward Fill (propagate next known value)")
         ]
@@ -1139,6 +1141,28 @@ Any unmapped province names will be reported for manual addition to mapping file
             ttk.Radiobutton(method_frame, text=label, variable=self.fillmiss_method_var, value=value).grid(
                 row=i, column=0, sticky=tk.W, pady=1, padx=10
             )
+
+        # Time window options (for recent_mean/recent_median)
+        time_window_frame = ttk.Frame(method_frame)
+        time_window_frame.grid(row=len(methods), column=0, sticky=tk.W, pady=5, padx=30)
+
+        ttk.Label(time_window_frame, text="Time Window (years):").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.fillmiss_time_window_var = tk.StringVar(value="10")
+        ttk.Entry(time_window_frame, textvariable=self.fillmiss_time_window_var, width=10).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(time_window_frame, text="(e.g., 10 = use 1977-5 to 1977+5 for year 1977)", font=("Helvetica", 8),
+                 foreground="gray").grid(row=0, column=2, sticky=tk.W, padx=(5, 0))
+
+        ttk.Label(time_window_frame, text="Year Column:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        self.fillmiss_year_column_var = tk.StringVar(value="build_year")
+        ttk.Entry(time_window_frame, textvariable=self.fillmiss_year_column_var, width=20).grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+        ttk.Label(time_window_frame, text="(auto-detect if empty)", font=("Helvetica", 8),
+                 foreground="gray").grid(row=1, column=2, sticky=tk.W, padx=(5, 0), pady=(5, 0))
+
+        ttk.Label(time_window_frame, text="Exclude Outliers:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        self.fillmiss_exclude_outliers_var = tk.StringVar(value="0")
+        ttk.Entry(time_window_frame, textvariable=self.fillmiss_exclude_outliers_var, width=10).grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
+        ttk.Label(time_window_frame, text="(e.g., 1 = exclude 1 min and 1 max)", font=("Helvetica", 8),
+                 foreground="gray").grid(row=2, column=2, sticky=tk.W, padx=(5, 0), pady=(5, 0))
 
         # Options
         opt_frame = ttk.LabelFrame(main_frame, text="Options", padding="10")
@@ -1159,8 +1183,9 @@ Any unmapped province names will be reported for manual addition to mapping file
         info_text = """Example: Fill missing capital_cost using (build_year, type, carrier)
 • Regression: Predicts values based on patterns in the data
 • Group Mean/Median: Uses average of similar groups
+• Recent Mean/Median: Uses values from nearby years (e.g., 10 years = year-5 to year+5)
 • Non-negative: Ensures physical constraints (e.g., costs can't be negative)
-• Automatic fallback: Falls back to simpler methods if needed"""
+• Outlier exclusion: Remove extreme values before calculating mean/median"""
         ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray",
                  justify=tk.LEFT, wraplength=800).pack(anchor=tk.W)
 
@@ -1202,16 +1227,49 @@ Any unmapped province names will be reported for manual addition to mapping file
                 sys.stdout = RedirectText(self.console)
                 sys.stderr = RedirectText(self.console)
 
+                # Get time window and year column parameters
+                time_window = None
+                year_column = None
+                exclude_outliers = 0
+                method = self.fillmiss_method_var.get()
+
+                if method in ['recent_mean', 'recent_median']:
+                    try:
+                        time_window_str = self.fillmiss_time_window_var.get().strip()
+                        if time_window_str:
+                            time_window = int(time_window_str)
+                    except ValueError:
+                        self.log("⚠ Invalid time window value, using default (10 years)")
+                        time_window = 10
+
+                    year_column_str = self.fillmiss_year_column_var.get().strip()
+                    if year_column_str:
+                        year_column = year_column_str
+                    # If empty, it will be auto-detected
+
+                    try:
+                        exclude_outliers_str = self.fillmiss_exclude_outliers_var.get().strip()
+                        if exclude_outliers_str:
+                            exclude_outliers = int(exclude_outliers_str)
+                            if exclude_outliers < 0:
+                                exclude_outliers = 0
+                    except ValueError:
+                        self.log("⚠ Invalid exclude outliers value, using default (0)")
+                        exclude_outliers = 0
+
                 filler = MissingValueFiller(verbose=True)
                 stats = filler.process_file(
                     input_file=input_file,
                     output_file=output_file,
                     target_column=target_col,
                     grouping_columns=grouping_cols,
-                    method=self.fillmiss_method_var.get(),
+                    method=method,
                     non_negative=self.fillmiss_nonneg_var.get(),
                     predictor_columns=None,
-                    backup=self.fillmiss_backup_var.get()
+                    backup=self.fillmiss_backup_var.get(),
+                    time_window=time_window,
+                    year_column=year_column,
+                    exclude_outliers=exclude_outliers
                 )
 
                 self.log(f"\n✓ Fill missing values completed!")
