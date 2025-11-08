@@ -2,6 +2,7 @@ from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
 from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names
 from libs.cc_merger import merge_cc_generators
+import matplotlib.pyplot as plt
 
 """
 Main function to run the single node analysis for all modelling years.
@@ -56,7 +57,18 @@ network = standardize_carrier_names(network, carrier_mapping)
 optimization_snapshots = network.snapshots[:48]
 
 # Run optimization for only the specified snapshots
-network.optimize(snapshots=optimization_snapshots) 
+network.optimize(snapshots=optimization_snapshots)
+
+# Display stacked area chart of generation by carrier
+ax = network.generators_t.p.iloc[:48].groupby(network.generators.carrier, axis=1).sum().plot.area(
+    figsize=(12, 6),
+    title='Generation by Carrier',
+    xlabel='Time',
+    ylabel='Power (MW)',
+    legend=True
+)
+plt.tight_layout()
+plt.show()
 
 # To do
 # 1. Add a gui function that allows the user to run utils. 

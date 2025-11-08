@@ -28,9 +28,10 @@ All regional aggregation settings are in config/config.yaml under 'regional_aggr
 
 from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
-from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network
+from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names
 from libs.cc_merger import merge_cc_generators
 from libs.region_aggregator import aggregate_network_by_region
+import matplotlib.pyplot as plt
 # ============================================================================
 # CONFIGURATION PARAMETERS
 # ============================================================================
@@ -72,7 +73,6 @@ network = aggregate_network_by_region(network, config)
 #
 # This is the FINAL step before optimization. All data import/processing uses original
 # carrier names, then we standardize everything at once for clean, consistent network.
-from libs.cost_mapping import standardize_carrier_names
 carrier_mapping = config.get('carrier_mapping', {})
 network = standardize_carrier_names(network, carrier_mapping)
 
@@ -82,12 +82,19 @@ optimization_snapshots = network.snapshots[:48]
 # Run optimization
 network.optimize(snapshots=optimization_snapshots)
 
-# Results would be available in:
+# Display stacked area chart of generation by carrier
+ax = network.generators_t.p.iloc[:48].groupby(network.generators.carrier, axis=1).sum().plot.area(
+    figsize=(12, 6),
+    title='Generation by Carrier (Regional Network)',
+    xlabel='Time',
+    ylabel='Power (MW)',
+    legend=True
+)
+plt.tight_layout()
+plt.show()
+
+# Results are available in:
 # - network.generators_t.p  (generator dispatch)
 # - network.lines_t.p0      (line flows)
 # - network.loads_t.p       (load consumption)
-
-
-# try with links
-# update to lines
 
