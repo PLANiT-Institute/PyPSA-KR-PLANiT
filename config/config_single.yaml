@@ -75,9 +75,11 @@ generator_attributes:
   gas:
     p_min_pu: 0.2
     p_max_pu: 1.0
+    max_cf: 0.5
   coal:
-    p_min_pu: 0.2
+    p_min_pu: 0.4
     p_max_pu: 1.0
+    max_cf: 0.5
   oil:
     p_min_pu: 0.2
     p_max_pu: 1.0
@@ -87,3 +89,11 @@ generator_attributes:
   hydro:
     p_min_pu: 0.2
     p_max_pu: 1.0
+
+global_constraints:
+  gas:
+    max_cf: 1
+  coal:
+    max_cf: 1
+  nuclear:
+    min_cf: 0

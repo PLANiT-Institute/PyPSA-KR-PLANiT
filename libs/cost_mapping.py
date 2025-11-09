@@ -116,8 +116,11 @@ def apply_generator_attributes(network, generator_attributes):
         PyPSA network object (modified in place)
     generator_attributes : dict
         Dictionary mapping carrier names to their attributes
+        Special carrier name 'default' applies to all generators that don't have
+        carrier-specific values.
         Example:
         {
+            'default': {'ramp_limit_up': 100, 'ramp_limit_down': 100},
             'gas': {'p_min_pu': 0.2, 'p_max_pu': 1.0},
             'coal': {'p_min_pu': 0.2, 'p_max_pu': 1.0}
         }
@@ -132,8 +135,21 @@ def apply_generator_attributes(network, generator_attributes):
 
     print(f"[info] Applying carrier-specific generator attributes...")
 
+    # Step 1: Apply default values to ALL generators (if 'default' exists)
+    if 'default' in generator_attributes:
+        default_attrs = generator_attributes['default']
+        print(f"[info] Applying default attributes to ALL generators:")
+        for attr, value in default_attrs.items():
+            network.generators[attr] = value
+            print(f"  - {attr} = {value}")
+
+    # Step 2: Apply carrier-specific values (overrides defaults)
     updated_count = 0
     for carrier, attributes in generator_attributes.items():
+        # Skip the 'default' entry
+        if carrier == 'default':
+            continue
+
         # Find generators with this carrier
         carrier_gens = network.generators[network.generators['carrier'] == carrier].index
 
@@ -148,7 +164,7 @@ def apply_generator_attributes(network, generator_attributes):
             print(f"  - {attr} = {value}")
             updated_count += 1
 
-    print(f"[info] Applied {updated_count} attribute updates")
+    print(f"[info] Applied {updated_count} carrier-specific attribute updates")
     return network
 
 

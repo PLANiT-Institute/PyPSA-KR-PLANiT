@@ -2,8 +2,8 @@ from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
 from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names, apply_generator_attributes
 from libs.cc_merger import merge_cc_generators
+from libs.generator_p_set import set_generator_p_set
 import plotly.express as px
-import pandas as pd
 
 """
 Main function to run the single node analysis for all modelling years.
@@ -20,7 +20,7 @@ Returns:
 dict : Dictionary of networks keyed by year
 """
 
-config_path='config/config_single.yaml'
+config_path='config/config_single.xlsx'
 # Load configuration
 config = load_config(config_path)
 
@@ -46,14 +46,16 @@ network = apply_snapshot_data_to_network(network, config, snapshot_df)
 
 network.generators_t.marginal_cost = network.generators_t.fuel_cost
 
-# Network is already single node - no bus mapping needed
-
 # IMPORTANT: Standardize carrier names at the END, just before optimization
 #
 # This is the FINAL step before optimization. All data import/processing uses original
 # carrier names, then we standardize everything at once for clean, consistent network.
 carrier_mapping = config.get('carrier_mapping', {})
 network = standardize_carrier_names(network, carrier_mapping)
+
+# Set p_set for solar and wind generators (AFTER standardization and attributes)
+# This must come AFTER carrier standardization so carrier names are correct
+network = set_generator_p_set(network,carrier_list=['solar', 'wind'])
 
 # Apply carrier-specific generator attributes (AFTER carrier standardization)
 # This sets p_min_pu, p_max_pu, etc. for each carrier type from config
@@ -72,6 +74,9 @@ gen_by_carrier = network.generators_t.p.iloc[:48].groupby(network.generators.car
 
 # Convert to long format for Plotly
 gen_data = gen_by_carrier.reset_index().melt(id_vars='snapshot', var_name='Carrier', value_name='Power (MW)')
+
+# Need to set PSH as storage
+# Need to add ESS
 
 # Create interactive area chart
 fig = px.area(
