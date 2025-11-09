@@ -1,9 +1,12 @@
 from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
-from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names, apply_generator_attributes
+from libs.temporal_data import apply_monthly_data_to_network, apply_snapshot_data_to_network
+from libs.carrier_standardization import standardize_carrier_names
+from libs.component_attributes import apply_generator_attributes, apply_storage_unit_attributes
 from libs.cc_merger import merge_cc_generators
 from libs.generator_p_set import set_generator_p_set
-import plotly.express as px
+from libs.energy_constraints import apply_cf_energy_constraints
+from libs.visualization import plot_generation_by_carrier
 
 """
 Main function to run the single node analysis for all modelling years.
@@ -62,41 +65,39 @@ network = set_generator_p_set(network,carrier_list=['solar', 'wind'])
 generator_attributes = config.get('generator_attributes', {})
 network = apply_generator_attributes(network, generator_attributes)
 
+# Apply carrier-specific storage_unit attributes (AFTER carrier standardization)
+# This sets efficiency_store, efficiency_dispatch, max_hours, etc. for each carrier type from config
+storage_unit_attributes = config.get('storage_unit_attributes', {})
+network = apply_storage_unit_attributes(network, storage_unit_attributes)
+
 # Define 48-hour snapshot range for optimization
 # Use the first 48 snapshots from the network
-optimization_snapshots = network.snapshots[:48]
+optimization_snapshots = network.snapshots[:480]
+
+# Apply capacity factor energy constraints (max_cf, min_cf → e_sum_max, e_sum_min)
+# This must be called AFTER snapshots are defined and BEFORE optimization
+network = apply_cf_energy_constraints(network, generator_attributes, optimization_snapshots)
 
 # Run optimization for only the specified snapshots
-network.optimize(snapshots=optimization_snapshots)
+status = network.optimize(snapshots=optimization_snapshots)
 
-# Display interactive stacked area chart of generation by carrier
-gen_by_carrier = network.generators_t.p.iloc[:48].groupby(network.generators.carrier, axis=1).sum()
-
-# Convert to long format for Plotly
-gen_data = gen_by_carrier.reset_index().melt(id_vars='snapshot', var_name='Carrier', value_name='Power (MW)')
-
-# Need to set PSH as storage
-# Need to add ESS
-
-# Create interactive area chart
-fig = px.area(
-    gen_data,
-    x='snapshot',
-    y='Power (MW)',
-    color='Carrier',
-    title='Generation by Carrier (Interactive)',
-    labels={'snapshot': 'Time'},
-    hover_data={'Power (MW)': ':.0f'}
-)
-
-fig.update_layout(
-    hovermode='x unified',
-    height=600,
-    xaxis_title='Time',
-    yaxis_title='Power (MW)'
-)
-
-fig.show()
+# Display chart only if optimization succeeded
+if status[0] == 'ok':
+    print("[info] Optimization succeeded")
+    # Display interactive stacked area chart of generation by carrier (includes storage units)
+    # Use carriers_order from config to control stacking (first = bottom/baseload, last = top)
+    carriers_order = config.get('carriers_order', None)
+    fig = plot_generation_by_carrier(
+        network,
+        snapshots=optimization_snapshots,
+        include_storage=True,
+        title='Generation by Carrier (Including Storage Discharge)',
+        carriers_order=carriers_order
+    )
+    fig.show()
+else:
+    print(f"[error] Optimization failed with status: {status[0]}")
+    print(f"[error] Termination condition: {status[1]}")
 
 # To do
 # 1. Add a gui function that allows the user to run utils. 

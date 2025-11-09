@@ -118,4 +118,8 @@ def load_config_from_excel(excel_path):
     df_years = pd.read_excel(excel_path, sheet_name='years')
     config['Years'] = df_years['year'].tolist()
 
+    # Load carrier order
+    df_carrier_order = pd.read_excel(excel_path, sheet_name='carrier_order')
+    config['carriers_order'] = df_carrier_order['carriers'].tolist()
+
     return config

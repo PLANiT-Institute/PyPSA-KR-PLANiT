@@ -28,9 +28,10 @@ All regional aggregation settings are in config/config.yaml under 'regional_aggr
 
 from libs.config import load_config
 from libs.data_loader import load_network, load_monthly_data, load_snapshot_data
-from libs.cost_mapping import apply_monthly_data_to_network, apply_snapshot_data_to_network, standardize_carrier_names
+from libs.temporal_data import apply_monthly_data_to_network, apply_snapshot_data_to_network
+from libs.carrier_standardization import standardize_carrier_names
 from libs.cc_merger import merge_cc_generators
-from libs.region_aggregator import aggregate_network_by_region
+from libs.archive.region_aggregator import aggregate_network_by_region
 import matplotlib.pyplot as plt
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -98,3 +99,12 @@ plt.show()
 # - network.lines_t.p0      (line flows)
 # - network.loads_t.p       (load consumption)
 
+
+# To do
+# 1. Add a gui function that allows the user to run utils. 
+# 2. Add a function to merge generators and others by privince or other regions in column (aggregation)
+# 3. Add a function to create a bus mapping function that allows the user to map the network to a single bus or multiple buses by region or other regions in column (aggregation)
+# 4. Add a function to create the links or lines (with limited flows or capacities that is user input) between buses
+# 5. add a function divide load into the region, and the share is from the config (normalized by the total value, the user can use the annual generation total, population or anything that the user would like to use)
+# 6. regional generation limit is from 행정구역별 시간대별 전력거래량 (generation by region and hour)
+# 7. regional load should come from somwehere. 
