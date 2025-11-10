@@ -83,7 +83,7 @@ def _ensure_named_dimensions(network):
                 ts_df.columns.name = ts_col_name
 
 
-def load_province_mapping(mapping_file='data/others/province_mapping.csv'):
+def load_province_mapping(mapping_file='data/others/province_mapping.csv', mapping_data=None):
     """
     Load province mapping for converting official names to short names.
 
@@ -91,14 +91,43 @@ def load_province_mapping(mapping_file='data/others/province_mapping.csv'):
     -----------
     mapping_file : str
         Path to province mapping CSV file
+    mapping_data : dict or DataFrame, optional
+        Mapping data already loaded in memory (e.g., from config)
 
     Returns:
     --------
     dict : Mapping from both official and short names to short names
     """
+    mapping = {}
+
+    # Prefer mapping data provided directly by the configuration
+    if mapping_data is not None:
+        if isinstance(mapping_data, pd.DataFrame):
+            records = mapping_data.to_dict('records')
+        elif isinstance(mapping_data, dict):
+            records = [{'official': official, 'short': short}
+                       for official, short in mapping_data.items()]
+        else:
+            # Assume iterable of dict-like rows
+            records = list(mapping_data)
+
+        for row in records:
+            short_raw = row.get('short')
+            official_raw = row.get('official')
+            short = None if pd.isna(short_raw) else str(short_raw).strip()
+            official = None if pd.isna(official_raw) else str(official_raw).strip()
+            if not short:
+                continue
+            if official:
+                mapping[official] = short
+            mapping[short] = short
+
+    if mapping:
+        return mapping
+
+    # Fall back to reading from file when config data is unavailable
     try:
         df = pd.read_csv(mapping_file, encoding='utf-8-sig')
-        mapping = {}
         for _, row in df.iterrows():
             short = str(row['short']).strip()
             official = str(row['official']).strip()
@@ -163,12 +192,23 @@ def _create_bus_to_region_mapping(network, region_column, province_mapping):
     return bus_to_region, regions
 
 
-def _aggregate_buses_by_region(network, region_column, regions):
+def _aggregate_buses_by_region(network, region_column, regions, bus_to_region):
     """
     Aggregate buses by region, creating one bus per region.
 
     This should be called AFTER components (lines, generators, etc.) have been
     updated to reference regional buses.
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        Network object
+    region_column : str
+        Name of the column containing region information
+    regions : set
+        Set of unique region names (standardized short names)
+    bus_to_region : dict
+        Mapping from old bus names to standardized region names
     """
     print(f"[info] Aggregating {len(network.buses)} buses by '{region_column}'...")
 
@@ -185,7 +225,9 @@ def _aggregate_buses_by_region(network, region_column, regions):
 
     # Create one bus per region (using average coordinates)
     for region in regions:
-        region_buses = network.buses[network.buses[region_column] == region]
+        # Get all buses that map to this region
+        buses_in_region = [bus_name for bus_name, reg in bus_to_region.items() if reg == region]
+        region_buses = network.buses.loc[buses_in_region]
 
         # Calculate average coordinates
         avg_x = region_buses['x'].mean()
@@ -502,9 +544,18 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
     print(f"[info] Aggregated into {len(grouped_links)} regional links")
 
 
-def _create_regional_loads(network, region_column, demand_file, province_mapping, load_carrier):
-    """Create regional loads based on demand data."""
-    print(f"[info] Creating regional loads from {demand_file}...")
+def _create_regional_loads(network, region_column, demand_file, province_mapping, load_carrier,
+                           demand_data=None):
+    """
+    Create regional loads based on demand data.
+
+    Parameters
+    ----------
+    demand_data : pandas.DataFrame, optional
+        Pre-loaded demand table from configuration (fallback to demand_file when None).
+    """
+    demand_source = "province_demand config sheet" if demand_data is not None else demand_file
+    print(f"[info] Creating regional loads from {demand_source}...")
 
     # Save existing load time series BEFORE removing invalid loads
     # This preserves the temporal pattern for distribution across regions
@@ -540,10 +591,18 @@ def _create_regional_loads(network, region_column, demand_file, province_mapping
 
     # Load demand data
     try:
-        if demand_file.endswith('.xlsx'):
-            demand_df = pd.read_excel(demand_file)
+        if demand_data is not None:
+            demand_df = demand_data.copy()
         else:
-            demand_df = pd.read_csv(demand_file)
+            if demand_file is None:
+                raise ValueError("No demand file path provided")
+            if demand_file.endswith('.xlsx'):
+                demand_df = pd.read_excel(demand_file)
+            else:
+                demand_df = pd.read_csv(demand_file)
+
+        if region_column not in demand_df.columns:
+            raise KeyError(f"Demand data missing '{region_column}' column")
 
         # Standardize region names in demand file
         if region_column in demand_df.columns:
@@ -654,7 +713,8 @@ def aggregate_network_by_region(network, config):
         load_carrier = None
 
     # Load province mapping
-    province_mapping = load_province_mapping(province_mapping_file)
+    province_mapping_data = config.get('province_mapping')
+    province_mapping = load_province_mapping(province_mapping_file, province_mapping_data)
 
     print(f"[info] Starting regional aggregation by '{region_column}'...")
 
@@ -665,7 +725,7 @@ def aggregate_network_by_region(network, config):
     bus_to_region, regions = _create_bus_to_region_mapping(network, region_column, province_mapping)
 
     # Step 3: Create regional buses FIRST (so components can reference them)
-    _aggregate_buses_by_region(network, region_column, regions)
+    _aggregate_buses_by_region(network, region_column, regions, bus_to_region)
 
     # Step 4: Update all components to reference regional buses
     # (MUST be done after creating regional buses)
@@ -691,8 +751,14 @@ def aggregate_network_by_region(network, config):
         network = aggregate_generators_by_carrier_and_region(network, config, region_column, province_mapping)
 
     # Step 6: Create regional loads
-    _create_regional_loads(network, region_column, demand_file,
-                          province_mapping, load_carrier)
+    _create_regional_loads(
+        network,
+        region_column,
+        demand_file,
+        province_mapping,
+        load_carrier,
+        demand_data=config.get('province_demand')
+    )
 
     print("[info] Regional aggregation complete")
 

@@ -40,6 +40,8 @@ from libs.generator_p_set import set_generator_p_set
 from libs.energy_constraints import apply_cf_energy_constraints
 from libs.visualization import plot_generation_by_carrier
 from libs.region_aggregator import aggregate_network_by_region
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -122,60 +124,3 @@ if status[0] == 'ok':
         carriers_order=carriers_order
     )
     fig.show()
-else:
-    print(f"[error] Optimization failed with status: {status[0]}")
-    print(f"[error] Termination condition: {status[1]}")
-
-# Summary statistics by province
-print("\n" + "="*80)
-print("PROVINCE-LEVEL SUMMARY")
-print("="*80)
-
-print(f"\nProvinces: {sorted(network.buses.index.tolist())}")
-print(f"Total Generators: {len(network.generators)}")
-print(f"Total Storage Units: {len(network.storage_units)}")
-print(f"Total Loads: {len(network.loads)}")
-print(f"Inter-province Lines: {len(network.lines)}")
-print(f"Inter-province Links: {len(network.links)}")
-
-if status[0] == 'ok':
-    print("\nGeneration by Province (MWh):")
-    print("-" * 80)
-    for bus in sorted(network.buses.index):
-        # Get generators in this province
-        gens_in_province = network.generators[network.generators['bus'] == bus]
-        if len(gens_in_province) > 0:
-            gen_names = gens_in_province.index.tolist()
-            total_gen = network.generators_t.p[gen_names].sum().sum()
-            print(f"  {bus:15s}: {total_gen:15,.0f} MWh")
-
-    print("\nLoad by Province (MWh):")
-    print("-" * 80)
-    for bus in sorted(network.buses.index):
-        # Get loads in this province
-        loads_in_province = network.loads[network.loads['bus'] == bus]
-        if len(loads_in_province) > 0:
-            load_names = loads_in_province.index.tolist()
-            total_load = network.loads_t.p[load_names].sum().sum()
-            print(f"  {bus:15s}: {total_load:15,.0f} MWh")
-
-    # Inter-province transmission flows
-    if len(network.lines) > 0:
-        print("\nInter-province Line Flows (MWh):")
-        print("-" * 80)
-        for line_name in network.lines.index:
-            bus0 = network.lines.loc[line_name, 'bus0']
-            bus1 = network.lines.loc[line_name, 'bus1']
-            flow = network.lines_t.p0[line_name].abs().sum()
-            print(f"  {bus0} ↔ {bus1}: {flow:15,.0f} MWh")
-
-    if len(network.links) > 0:
-        print("\nInter-province Link Flows (MWh):")
-        print("-" * 80)
-        for link_name in network.links.index:
-            bus0 = network.links.loc[link_name, 'bus0']
-            bus1 = network.links.loc[link_name, 'bus1']
-            flow = network.links_t.p0[link_name].abs().sum()
-            print(f"  {bus0} ↔ {bus1}: {flow:15,.0f} MWh")
-
-print("\n" + "="*80)

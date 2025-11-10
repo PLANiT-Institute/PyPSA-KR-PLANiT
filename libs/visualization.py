@@ -5,6 +5,7 @@ This module provides interactive and static visualization of network
 optimization results including generation, storage, and load data.
 """
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
 
 
@@ -300,5 +301,339 @@ def plot_load_and_generation(network, snapshots=None, title='Load vs Generation'
         xaxis_title='Time',
         yaxis_title='Power (MW)'
     )
+
+    return fig
+
+
+def plot_transmission_flows(network, snapshots=None, component='lines', top_n=10, title=None):
+    """
+    Create interactive chart showing energy flows in transmission lines or links.
+
+    Displays power flows between buses over time. Shows the absolute flow values
+    (magnitude of power transfer regardless of direction).
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        PyPSA network object with optimization results
+    snapshots : pd.Index or None
+        Snapshots to plot. If None, uses all available snapshots
+    component : str
+        Type of component to visualize: 'lines' or 'links' (default: 'lines')
+    top_n : int or None
+        Number of transmission components with highest total energy to display.
+        If None, shows all components (default: 10)
+    title : str or None
+        Chart title. If None, generates default title based on component type
+
+    Returns:
+    --------
+    plotly.graph_objects.Figure or None
+        Interactive Plotly figure, or None if no data available
+
+    Example:
+    --------
+    >>> # Show top 10 inter-provincial line flows
+    >>> fig = plot_transmission_flows(network, snapshots=network.snapshots[:48], component='lines', top_n=10)
+    >>> fig.show()
+
+    >>> # Show all link flows
+    >>> fig = plot_transmission_flows(network, component='links', top_n=None)
+    >>> fig.show()
+    """
+    if component not in ['lines', 'links']:
+        print(f"[error] component must be 'lines' or 'links', got '{component}'")
+        return None
+
+    # Get component DataFrame and time-series data
+    if component == 'lines':
+        if len(network.lines) == 0:
+            print("[info] No lines in network")
+            return None
+
+        if not hasattr(network.lines_t, 'p0') or network.lines_t.p0 is None:
+            print("[error] No line flow data (lines_t.p0) found")
+            return None
+
+        comp_df = network.lines
+        flow_data = network.lines_t.p0
+        default_title = 'Transmission Line Flows'
+
+    else:  # links
+        if len(network.links) == 0:
+            print("[info] No links in network")
+            return None
+
+        if not hasattr(network.links_t, 'p0') or network.links_t.p0 is None:
+            print("[error] No link flow data (links_t.p0) found")
+            return None
+
+        comp_df = network.links
+        flow_data = network.links_t.p0
+        default_title = 'Link Flows'
+
+    # Set snapshots
+    if snapshots is None:
+        snapshots = flow_data.index
+
+    # Get flow data for selected snapshots
+    flow_subset = flow_data.loc[snapshots]
+
+    # Calculate total energy (absolute value) for each component
+    total_energy = flow_subset.abs().sum()
+
+    if total_energy.sum() == 0:
+        print(f"[info] No {component} flow detected in selected snapshots")
+        return None
+
+    # Select top_n components by total energy if specified
+    if top_n is not None and top_n < len(total_energy):
+        top_components = total_energy.nlargest(top_n).index
+        flow_subset = flow_subset[top_components]
+        print(f"[info] Showing top {top_n} {component} with highest energy flows")
+    else:
+        top_components = total_energy.index
+        print(f"[info] Showing all {len(top_components)} {component}")
+
+    # Create labels with bus0 -> bus1 format
+    labels = {}
+    for comp_name in top_components:
+        bus0 = comp_df.loc[comp_name, 'bus0']
+        bus1 = comp_df.loc[comp_name, 'bus1']
+        labels[comp_name] = f"{bus0} → {bus1}"
+
+    # Rename columns with descriptive labels
+    flow_labeled = flow_subset.rename(columns=labels)
+
+    # Take absolute values for visualization (show magnitude of flow)
+    flow_abs = flow_labeled.abs()
+
+    # Convert to long format for Plotly
+    flow_reset = flow_abs.reset_index()
+    flow_long = flow_reset.melt(
+        id_vars='snapshot',
+        var_name='Route',
+        value_name='Power (MW)'
+    )
+
+    # Create line chart
+    fig = px.line(
+        flow_long,
+        x='snapshot',
+        y='Power (MW)',
+        color='Route',
+        title=title if title else default_title,
+        labels={'snapshot': 'Time'},
+        hover_data={'Power (MW)': ':.0f'}
+    )
+
+    fig.update_layout(
+        hovermode='x unified',
+        height=600,
+        xaxis_title='Time',
+        yaxis_title='Power (MW)',
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.01
+        )
+    )
+
+    # Print summary statistics
+    print(f"[info] Created {component} flow plot for {len(snapshots)} snapshots")
+    print(f"[info] Total energy transferred:")
+    for route, energy in total_energy.loc[top_components].sort_values(ascending=False).items():
+        bus0 = comp_df.loc[route, 'bus0']
+        bus1 = comp_df.loc[route, 'bus1']
+        print(f"  {bus0} → {bus1}: {energy:,.0f} MWh")
+
+    return fig
+
+
+def plot_transmission_flows_map(network, snapshots=None, component='links', top_n=20, title=None):
+    """
+    Create interactive map showing energy flows between provinces/regions.
+
+    Displays transmission flows as lines on a map with thickness proportional
+    to total energy transferred. Bus positions are read from network.buses
+    (x=longitude, y=latitude coordinates).
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        PyPSA network object with optimization results
+    snapshots : pd.Index or None
+        Snapshots to plot. If None, uses all available snapshots
+    component : str
+        Type of component to visualize: 'lines' or 'links' (default: 'links')
+    top_n : int or None
+        Number of transmission components with highest total energy to display.
+        If None, shows all components (default: 20)
+    title : str or None
+        Chart title. If None, generates default title based on component type
+
+    Returns:
+    --------
+    plotly.graph_objects.Figure or None
+        Interactive Plotly map figure, or None if no data available
+
+    Example:
+    --------
+    >>> # Show top 20 inter-provincial flows on map
+    >>> fig = plot_transmission_flows_map(network, snapshots=network.snapshots[:48], component='links', top_n=20)
+    >>> fig.show()
+    """
+    if component not in ['lines', 'links']:
+        print(f"[error] component must be 'lines' or 'links', got '{component}'")
+        return None
+
+    # Get component DataFrame and time-series data
+    if component == 'lines':
+        if len(network.lines) == 0:
+            print("[info] No lines in network")
+            return None
+
+        if not hasattr(network.lines_t, 'p0') or network.lines_t.p0 is None:
+            print("[error] No line flow data (lines_t.p0) found")
+            return None
+
+        comp_df = network.lines
+        flow_data = network.lines_t.p0
+        default_title = 'Transmission Line Flows Map'
+
+    else:  # links
+        if len(network.links) == 0:
+            print("[info] No links in network")
+            return None
+
+        if not hasattr(network.links_t, 'p0') or network.links_t.p0 is None:
+            print("[error] No link flow data (links_t.p0) found")
+            return None
+
+        comp_df = network.links
+        flow_data = network.links_t.p0
+        default_title = 'Link Flows Map'
+
+    # Check if buses have coordinates
+    if 'x' not in network.buses.columns or 'y' not in network.buses.columns:
+        print("[error] Bus coordinates (x=longitude, y=latitude) not found in network.buses")
+        return None
+
+    # Set snapshots
+    if snapshots is None:
+        snapshots = flow_data.index
+
+    # Get flow data for selected snapshots
+    flow_subset = flow_data.loc[snapshots]
+
+    # Calculate total energy (absolute value) for each component
+    total_energy = flow_subset.abs().sum()
+
+    if total_energy.sum() == 0:
+        print(f"[info] No {component} flow detected in selected snapshots")
+        return None
+
+    # Select top_n components by total energy if specified
+    if top_n is not None and top_n < len(total_energy):
+        top_components = total_energy.nlargest(top_n).index
+        print(f"[info] Showing top {top_n} {component} with highest energy flows")
+    else:
+        top_components = total_energy.index
+        print(f"[info] Showing all {len(top_components)} {component}")
+
+    # Create figure
+    fig = go.Figure()
+
+    # Add transmission lines/links
+    max_energy = total_energy.loc[top_components].max()
+
+    for comp_name in top_components:
+        bus0_name = comp_df.loc[comp_name, 'bus0']
+        bus1_name = comp_df.loc[comp_name, 'bus1']
+        energy = total_energy.loc[comp_name]
+
+        # Get bus coordinates
+        if bus0_name not in network.buses.index or bus1_name not in network.buses.index:
+            continue
+
+        lon0 = network.buses.loc[bus0_name, 'x']
+        lat0 = network.buses.loc[bus0_name, 'y']
+        lon1 = network.buses.loc[bus1_name, 'x']
+        lat1 = network.buses.loc[bus1_name, 'y']
+
+        # Calculate line width based on energy (normalized)
+        line_width = 1 + (energy / max_energy) * 10  # Scale from 1 to 11
+
+        # Add line for this connection
+        fig.add_trace(go.Scattergeo(
+            lon=[lon0, lon1],
+            lat=[lat0, lat1],
+            mode='lines',
+            line=dict(width=line_width, color='rgba(255, 0, 0, 0.6)'),
+            hovertemplate=(
+                f"<b>{bus0_name} → {bus1_name}</b><br>"
+                f"Total Energy: {energy:,.0f} MWh<br>"
+                "<extra></extra>"
+            ),
+            showlegend=False
+        ))
+
+    # Add bus markers
+    bus_names = []
+    bus_lons = []
+    bus_lats = []
+
+    # Get all unique buses involved in flows
+    involved_buses = set()
+    for comp_name in top_components:
+        involved_buses.add(comp_df.loc[comp_name, 'bus0'])
+        involved_buses.add(comp_df.loc[comp_name, 'bus1'])
+
+    for bus_name in involved_buses:
+        if bus_name in network.buses.index:
+            bus_names.append(bus_name)
+            bus_lons.append(network.buses.loc[bus_name, 'x'])
+            bus_lats.append(network.buses.loc[bus_name, 'y'])
+
+    # Add bus markers
+    fig.add_trace(go.Scattergeo(
+        lon=bus_lons,
+        lat=bus_lats,
+        mode='markers+text',
+        marker=dict(size=12, color='blue', symbol='circle'),
+        text=bus_names,
+        textposition='top center',
+        textfont=dict(size=10, color='black'),
+        hovertemplate='<b>%{text}</b><extra></extra>',
+        showlegend=False
+    ))
+
+    # Update layout for Korea map
+    fig.update_layout(
+        title=title if title else default_title,
+        geo=dict(
+            scope='asia',
+            center=dict(lat=36.5, lon=127.5),  # Center of South Korea
+            projection_scale=20,  # Zoom level
+            showland=True,
+            landcolor='rgb(243, 243, 243)',
+            coastlinecolor='rgb(204, 204, 204)',
+            showlakes=True,
+            lakecolor='rgb(255, 255, 255)',
+            showcountries=True,
+            countrycolor='rgb(204, 204, 204)',
+        ),
+        height=800,
+        width=900
+    )
+
+    print(f"[info] Created {component} flow map for {len(snapshots)} snapshots")
+    print(f"[info] Top flows displayed:")
+    for route, energy in total_energy.loc[top_components].sort_values(ascending=False).head(10).items():
+        bus0 = comp_df.loc[route, 'bus0']
+        bus1 = comp_df.loc[route, 'bus1']
+        print(f"  {bus0} → {bus1}: {energy:,.0f} MWh")
 
     return fig

@@ -193,4 +193,27 @@ def load_config_from_excel(excel_path):
     except Exception:
         pass  # Sheet doesn't exist, skip
 
+    # Load province mapping (if sheet exists)
+    try:
+        df_province_mapping = pd.read_excel(excel_path, sheet_name='province_mapping')
+        config['province_mapping'] = dict(zip(
+            df_province_mapping['official'],
+            df_province_mapping['short']
+        ))
+        # Also add reverse mapping (short -> official) for display purposes
+        config['province_mapping_reverse'] = dict(zip(
+            df_province_mapping['short'],
+            df_province_mapping['official']
+        ))
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
+    # Load province demand (if sheet exists)
+    try:
+        df_province_demand = pd.read_excel(excel_path, sheet_name='province_demand')
+        # Store as DataFrame for regional load creation
+        config['province_demand'] = df_province_demand
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
     return config
