@@ -139,7 +139,7 @@ def _clean_duplicate_columns(network):
         network.buses.drop(columns=duplicate_cols, inplace=True)
 
 
-def _create_bus_to_region_mapping(network, region_column):
+def _create_bus_to_region_mapping(network, region_column, province_mapping):
     """
     Create mapping from old bus names to regional bus names.
 
@@ -148,11 +148,16 @@ def _create_bus_to_region_mapping(network, region_column):
     """
     print(f"[info] Creating bus-to-region mapping from '{region_column}'...")
 
-    # Create mapping from old bus to region
-    bus_to_region = network.buses[region_column].to_dict()
+    # Create mapping from old bus to region (using standardized short names)
+    bus_to_region = {}
+    for bus_name, region_name in network.buses[region_column].items():
+        if pd.notna(region_name):
+            # Standardize to short name (e.g., '강원특별자치도' -> '강원')
+            standardized = standardize_region_name(region_name, province_mapping)
+            bus_to_region[bus_name] = standardized
 
-    # Get unique regions
-    regions = network.buses[region_column].dropna().unique()
+    # Get unique standardized regions
+    regions = set(bus_to_region.values())
     print(f"[info] Found {len(regions)} unique regions: {sorted(regions)}")
 
     return bus_to_region, regions
@@ -657,7 +662,7 @@ def aggregate_network_by_region(network, config):
     _clean_duplicate_columns(network)
 
     # Step 2: Create bus-to-region mapping (BEFORE removing old buses)
-    bus_to_region, regions = _create_bus_to_region_mapping(network, region_column)
+    bus_to_region, regions = _create_bus_to_region_mapping(network, region_column, province_mapping)
 
     # Step 3: Create regional buses FIRST (so components can reference them)
     _aggregate_buses_by_region(network, region_column, regions)

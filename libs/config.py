@@ -122,4 +122,75 @@ def load_config_from_excel(excel_path):
     df_carrier_order = pd.read_excel(excel_path, sheet_name='carrier_order')
     config['carriers_order'] = df_carrier_order['carriers'].tolist()
 
+    # Load regional aggregation settings (if sheet exists)
+    try:
+        df_regional_agg = pd.read_excel(excel_path, sheet_name='regional_aggregation')
+        config['regional_aggregation'] = {}
+        for _, row in df_regional_agg.iterrows():
+            setting = row['setting']
+            value = row['value']
+            # Convert TRUE/FALSE strings to boolean
+            if isinstance(value, str) and value.upper() in ['TRUE', 'FALSE']:
+                value = value.upper() == 'TRUE'
+            config['regional_aggregation'][setting] = value
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
+    # Load generator region aggregator rules (if sheet exists)
+    try:
+        df_gen_region_rules = pd.read_excel(excel_path, sheet_name='generator_region_aggregator_rules')
+        config['generator_region_aggregator_rules'] = dict(zip(
+            df_gen_region_rules['attribute'],
+            df_gen_region_rules['rule']
+        ))
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
+    # Load generator_t aggregator rules (if sheet exists)
+    try:
+        df_gen_t_rules = pd.read_excel(excel_path, sheet_name='generator_t_aggregator_rules')
+        config['generator_t_aggregator_rules'] = dict(zip(
+            df_gen_t_rules['attribute'],
+            df_gen_t_rules['rule']
+        ))
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
+    # Load lines config (if sheet exists)
+    try:
+        df_lines_config = pd.read_excel(excel_path, sheet_name='lines_config')
+        lines_config = {}
+        for _, row in df_lines_config.iterrows():
+            setting = row['setting']
+            value = row['value']
+            # Convert TRUE/FALSE strings to boolean
+            if isinstance(value, str) and value.upper() in ['TRUE', 'FALSE']:
+                value = value.upper() == 'TRUE'
+            lines_config[setting] = value
+        config['regional_aggregation'] = config.get('regional_aggregation', {})
+        config['regional_aggregation']['lines'] = lines_config
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
+    # Load links config (if sheet exists)
+    try:
+        df_links_config = pd.read_excel(excel_path, sheet_name='links_config')
+        links_config = {}
+        for _, row in df_links_config.iterrows():
+            setting = row['setting']
+            value = row['value']
+            # Convert TRUE/FALSE strings to boolean
+            if isinstance(value, str) and value.upper() in ['TRUE', 'FALSE']:
+                value = value.upper() == 'TRUE'
+            # Convert numeric strings to numbers
+            try:
+                value = float(value)
+            except:
+                pass
+            links_config[setting] = value
+        config['regional_aggregation'] = config.get('regional_aggregation', {})
+        config['regional_aggregation']['links'] = links_config
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
     return config

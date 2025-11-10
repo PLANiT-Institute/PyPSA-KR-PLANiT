@@ -72,7 +72,7 @@ network = apply_storage_unit_attributes(network, storage_unit_attributes)
 
 # Define 48-hour snapshot range for optimization
 # Use the first 48 snapshots from the network
-optimization_snapshots = network.snapshots[:480]
+optimization_snapshots = network.snapshots[:48]
 
 # Apply capacity factor energy constraints (max_cf, min_cf → e_sum_max, e_sum_min)
 # This must be called AFTER snapshots are defined and BEFORE optimization

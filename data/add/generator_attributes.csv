@@ -1,6 +1,0 @@
-﻿carriers,p_min_pu,p_max_pu,ramp_limit_up,ramp_limit_down,min_up_time,min_down_time
-gas,0.4,1,0.2,0.2,6,6
-coal,0.4,1,0.1,0.1,12,12
-oil,0.2,1,0.5,0.5,1,1
-nuclear,0.6,1,0.05,0.05,24,24
-hydro,0.2,1,0.2,0.2,1,1
