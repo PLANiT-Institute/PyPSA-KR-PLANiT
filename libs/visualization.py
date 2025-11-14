@@ -637,3 +637,254 @@ def plot_transmission_flows_map(network, snapshots=None, component='links', top_
         print(f"  {bus0} → {bus1}: {energy:,.0f} MWh")
 
     return fig
+
+
+def plot_link_and_line_flows(network, snapshots=None, title='Link and Line Flow Over Time'):
+    """
+    Create interactive line chart showing link and line flows over time.
+
+    Each link and line is displayed as a separate line trace with different colors.
+    Positive values indicate flow in the bus0 → bus1 direction, negative values
+    indicate reverse flow.
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        PyPSA network object with optimization results
+    snapshots : pd.Index or None
+        Snapshots to plot. If None, uses all available snapshots
+    title : str
+        Chart title (default: 'Link and Line Flow Over Time')
+
+    Returns:
+    --------
+    plotly.graph_objects.Figure or None
+        Interactive Plotly figure, or None if no link or line flow data available
+
+    Example:
+    --------
+    >>> # After optimization
+    >>> fig = plot_link_and_line_flows(network, snapshots=network.snapshots[:48])
+    >>> if fig:
+    >>>     fig.show()
+    """
+    # Create figure
+    flow_fig = go.Figure()
+    has_data = False
+
+    # Add link flows to chart
+    if len(network.links) > 0 and hasattr(network, 'links_t') and hasattr(network.links_t, 'p0'):
+        try:
+            p0_df = network.links_t.p0
+            if len(p0_df) > 0:
+                # Use provided snapshots or all available
+                if snapshots is None:
+                    snapshots = p0_df.index
+
+                for link_idx in network.links.index:
+                    if link_idx in p0_df.columns:
+                        flow_series = p0_df.loc[snapshots, link_idx]
+                        bus0 = network.links.at[link_idx, 'bus0']
+                        bus1 = network.links.at[link_idx, 'bus1']
+
+                        flow_fig.add_trace(go.Scatter(
+                            x=snapshots,
+                            y=flow_series,
+                            mode='lines',
+                            name=f'Link: {bus0} → {bus1}',
+                            line=dict(width=2),
+                            hovertemplate='%{y:.2f} MW<extra></extra>'
+                        ))
+                        has_data = True
+
+                print(f"[info] Added {len(network.links)} links to flow chart")
+        except Exception as e:
+            print(f"[warn] Could not plot link flows: {e}")
+
+    # Add line flows to chart (if lines exist)
+    if len(network.lines) > 0 and hasattr(network, 'lines_t') and hasattr(network.lines_t, 'p0'):
+        try:
+            lines_p0_df = network.lines_t.p0
+            if len(lines_p0_df) > 0:
+                # Use provided snapshots or all available
+                if snapshots is None:
+                    snapshots = lines_p0_df.index
+
+                for line_idx in network.lines.index:
+                    if line_idx in lines_p0_df.columns:
+                        flow_series = lines_p0_df.loc[snapshots, line_idx]
+                        bus0 = network.lines.at[line_idx, 'bus0']
+                        bus1 = network.lines.at[line_idx, 'bus1']
+
+                        flow_fig.add_trace(go.Scatter(
+                            x=snapshots,
+                            y=flow_series,
+                            mode='lines',
+                            name=f'Line: {bus0} → {bus1}',
+                            line=dict(width=2, dash='dot'),
+                            hovertemplate='%{y:.2f} MW<extra></extra>'
+                        ))
+                        has_data = True
+
+                print(f"[info] Added {len(network.lines)} lines to flow chart")
+        except Exception as e:
+            print(f"[warn] Could not plot line flows: {e}")
+
+    # Return None if no data was added
+    if not has_data:
+        print("[warn] No link or line flow data to plot")
+        return None
+
+    # Update layout
+    flow_fig.update_layout(
+        title=title,
+        xaxis_title='Time',
+        yaxis_title='Power Flow (MW)',
+        hovermode='x unified',
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02
+        ),
+        height=500
+    )
+
+    return flow_fig
+
+
+def print_link_and_line_flow_analysis(network, snapshots=None):
+    """
+    Print detailed analysis of link and line flows including capacity configuration
+    and flow statistics.
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        PyPSA network object with optimization results
+    snapshots : pd.Index or None
+        Snapshots to analyze. If None, uses all available snapshots
+
+    Example:
+    --------
+    >>> # After optimization
+    >>> print_link_and_line_flow_analysis(network, snapshots=network.snapshots[:48])
+    """
+    # Analyze links
+    if len(network.links) > 0:
+        print(f"\nTotal links in network: {len(network.links)}")
+        print("\n--- Link Capacity and Configuration ---")
+
+        # Display link configuration
+        for link_idx in network.links.index:
+            bus0 = network.links.at[link_idx, 'bus0']
+            bus1 = network.links.at[link_idx, 'bus1']
+            p_nom = network.links.at[link_idx, 'p_nom']
+            efficiency = network.links.at[link_idx, 'efficiency']
+            print(f"{link_idx}: {bus0} → {bus1}, p_nom={p_nom:.0f} MW, eff={efficiency:.3f}", end="")
+
+            if 'p_min_pu' in network.links.columns:
+                p_min_pu = network.links.at[link_idx, 'p_min_pu']
+                if p_min_pu < 0:
+                    print(f", bidirectional (p_min_pu={p_min_pu:.1f})")
+                else:
+                    print()
+            else:
+                print()
+
+        # Show link flow statistics
+        if hasattr(network, 'links_t') and hasattr(network.links_t, 'p0'):
+            try:
+                p0_df = network.links_t.p0
+                if len(p0_df) > 0:
+                    print("\n--- Link Flow Statistics (over optimization period) ---")
+
+                    # Use provided snapshots or all available
+                    if snapshots is None:
+                        snapshots = p0_df.index
+
+                    for link_idx in network.links.index:
+                        if link_idx in p0_df.columns:
+                            # Get flow data for this link
+                            flow_series = p0_df.loc[snapshots, link_idx]
+
+                            bus0 = network.links.at[link_idx, 'bus0']
+                            bus1 = network.links.at[link_idx, 'bus1']
+                            p_nom = network.links.at[link_idx, 'p_nom']
+
+                            mean_flow = flow_series.mean()
+                            max_flow = flow_series.max()
+                            min_flow = flow_series.min()
+                            utilization = abs(flow_series).max() / p_nom * 100
+
+                            print(f"\n{link_idx}:")
+                            print(f"  Direction: {bus0} → {bus1}")
+                            print(f"  Capacity: {p_nom:.0f} MW")
+                            print(f"  Mean flow: {mean_flow:.2f} MW")
+                            print(f"  Max flow: {max_flow:.2f} MW (forward)")
+                            print(f"  Min flow: {min_flow:.2f} MW {'(reverse)' if min_flow < 0 else ''}")
+                            print(f"  Utilization: {utilization:.1f}%")
+                        else:
+                            print(f"\n{link_idx}: No flow data available")
+                else:
+                    print("\n[warn] No link flow data available (empty DataFrame)")
+            except Exception as e:
+                print(f"\n[error] Could not retrieve link flow data: {e}")
+        else:
+            print("\n[warn] No link flow data available")
+    else:
+        print("\nNo links in the network")
+
+    # Analyze lines
+    if len(network.lines) > 0:
+        print(f"\n\nTotal lines in network: {len(network.lines)}")
+        print("\n--- Line Capacity and Configuration ---")
+
+        # Display line configuration
+        for line_idx in network.lines.index:
+            bus0 = network.lines.at[line_idx, 'bus0']
+            bus1 = network.lines.at[line_idx, 'bus1']
+            s_nom = network.lines.at[line_idx, 's_nom']
+            print(f"{line_idx}: {bus0} → {bus1}, s_nom={s_nom:.0f} MVA")
+
+        # Show line flow statistics
+        if hasattr(network, 'lines_t') and hasattr(network.lines_t, 'p0'):
+            try:
+                lines_p0_df = network.lines_t.p0
+                if len(lines_p0_df) > 0:
+                    print("\n--- Line Flow Statistics (over optimization period) ---")
+
+                    # Use provided snapshots or all available
+                    if snapshots is None:
+                        snapshots = lines_p0_df.index
+
+                    for line_idx in network.lines.index:
+                        if line_idx in lines_p0_df.columns:
+                            # Get flow data for this line
+                            flow_series = lines_p0_df.loc[snapshots, line_idx]
+
+                            bus0 = network.lines.at[line_idx, 'bus0']
+                            bus1 = network.lines.at[line_idx, 'bus1']
+                            s_nom = network.lines.at[line_idx, 's_nom']
+
+                            mean_flow = flow_series.mean()
+                            max_flow = flow_series.max()
+                            min_flow = flow_series.min()
+                            utilization = abs(flow_series).max() / s_nom * 100
+
+                            print(f"\n{line_idx}:")
+                            print(f"  Direction: {bus0} → {bus1}")
+                            print(f"  Capacity: {s_nom:.0f} MVA")
+                            print(f"  Mean flow: {mean_flow:.2f} MW")
+                            print(f"  Max flow: {max_flow:.2f} MW (forward)")
+                            print(f"  Min flow: {min_flow:.2f} MW {'(reverse)' if min_flow < 0 else ''}")
+                            print(f"  Utilization: {utilization:.1f}%")
+                        else:
+                            print(f"\n{line_idx}: No flow data available")
+                else:
+                    print("\n[warn] No line flow data available (empty DataFrame)")
+            except Exception as e:
+                print(f"\n[error] Could not retrieve line flow data: {e}")
+        else:
+            print("\n[warn] No line flow data available")

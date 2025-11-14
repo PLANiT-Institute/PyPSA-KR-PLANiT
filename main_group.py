@@ -57,7 +57,7 @@ from libs.component_attributes import apply_generator_attributes, apply_storage_
 from libs.cc_merger import merge_cc_generators
 from libs.generator_p_set import set_generator_p_set
 from libs.energy_constraints import apply_cf_energy_constraints
-from libs.visualization import plot_generation_by_carrier
+from libs.visualization import plot_generation_by_carrier, plot_link_and_line_flows, print_link_and_line_flow_analysis
 from libs.region_aggregator import aggregate_network_by_region
 
 # ============================================================================
@@ -149,3 +149,18 @@ if status[0] == 'ok':
         carriers_order=carriers_order
     )
     fig.show()
+
+    # Display link and line flows
+    print("\n" + "="*80)
+    print("LINK AND LINE FLOW ANALYSIS")
+    print("="*80)
+
+    # Create and show link/line flow chart
+    flow_fig = plot_link_and_line_flows(network, snapshots=optimization_snapshots)
+    if flow_fig:
+        flow_fig.show()
+
+    # Print detailed link/line flow analysis
+    print_link_and_line_flow_analysis(network, snapshots=optimization_snapshots)
+
+    print("\n" + "="*80)
