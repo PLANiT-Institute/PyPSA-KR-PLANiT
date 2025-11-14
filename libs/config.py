@@ -138,7 +138,7 @@ def load_config_from_excel(excel_path):
 
     # Load generator region aggregator rules (if sheet exists)
     try:
-        df_gen_region_rules = pd.read_excel(excel_path, sheet_name='generator_region_aggregator_rules')
+        df_gen_region_rules = pd.read_excel(excel_path, sheet_name='generator_region_agg_rules')
         config['generator_region_aggregator_rules'] = dict(zip(
             df_gen_region_rules['attribute'],
             df_gen_region_rules['rule']
@@ -196,6 +196,9 @@ def load_config_from_excel(excel_path):
     # Load province mapping (if sheet exists)
     try:
         df_province_mapping = pd.read_excel(excel_path, sheet_name='province_mapping')
+        # Store as DataFrame to access group columns (group1, group2)
+        config['province_mapping_df'] = df_province_mapping
+        # Also keep the dict mapping for backward compatibility
         config['province_mapping'] = dict(zip(
             df_province_mapping['official'],
             df_province_mapping['short']

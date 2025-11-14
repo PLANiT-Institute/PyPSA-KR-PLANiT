@@ -223,7 +223,8 @@ def _aggregate_buses_by_region(network, region_column, regions, bus_to_region):
     # Store old buses for removal
     old_buses = network.buses.index.tolist()
 
-    # Create one bus per region (using average coordinates)
+    # Calculate bus attributes before removing old buses
+    new_buses_data = {}
     for region in regions:
         # Get all buses that map to this region
         buses_in_region = [bus_name for bus_name, reg in bus_to_region.items() if reg == region]
@@ -236,23 +237,34 @@ def _aggregate_buses_by_region(network, region_column, regions, bus_to_region):
         # Get average voltage (or max)
         v_nom = region_buses['v_nom'].max() if 'v_nom' in region_buses.columns else 345000.0
 
+        new_buses_data[region] = {
+            'x': avg_x,
+            'y': avg_y,
+            'v_nom': v_nom,
+            'carrier': carrier,
+            'country': country,
+            'province': region
+        }
+
+    # Remove old buses FIRST
+    for old_bus in old_buses:
+        network.remove("Bus", old_bus)
+
+    # Create new buses AFTER removing old ones
+    for region, bus_data in new_buses_data.items():
         # Add regional bus (only with standard PyPSA attributes)
         network.add(
             "Bus",
             region,
-            x=avg_x,
-            y=avg_y,
-            v_nom=v_nom,
-            carrier=carrier
+            x=bus_data['x'],
+            y=bus_data['y'],
+            v_nom=bus_data['v_nom'],
+            carrier=bus_data['carrier']
         )
 
         # Add custom attributes directly to DataFrame
-        network.buses.loc[region, 'country'] = country
-        network.buses.loc[region, 'province'] = region
-
-    # Remove old buses
-    for old_bus in old_buses:
-        network.remove("Bus", old_bus)
+        network.buses.loc[region, 'country'] = bus_data['country']
+        network.buses.loc[region, 'province'] = bus_data['province']
 
     print(f"[info] Created {len(regions)} regional buses")
 
@@ -453,12 +465,31 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
         network.links = network.links[self_loop_mask].copy()
         print(f"[info] Removed {removed} self-loop links")
 
+    # Check if links should be treated as directional
+    directional = link_config.get('directional', True)
+
+    # If not directional, normalize bus pairs so (A,B) and (B,A) are treated as the same
+    if not directional:
+        # Create a normalized pair identifier (always sorted order)
+        network.links['bus_pair'] = network.links.apply(
+            lambda row: tuple(sorted([row['region0'], row['region1']])),
+            axis=1
+        )
+
     # Group by region pairs
     grouping = link_config.get('grouping', 'ignore_voltage')
-    if grouping == 'by_voltage' and 'v_nom' in network.links.columns:
-        group_cols = ['region0', 'region1', 'v_nom']
+    if not directional:
+        # Group by normalized bus pair
+        if grouping == 'by_voltage' and 'v_nom' in network.links.columns:
+            group_cols = ['bus_pair', 'v_nom']
+        else:
+            group_cols = ['bus_pair']
     else:
-        group_cols = ['region0', 'region1']
+        # Group by directional bus pairs
+        if grouping == 'by_voltage' and 'v_nom' in network.links.columns:
+            group_cols = ['region0', 'region1', 'v_nom']
+        else:
+            group_cols = ['region0', 'region1']
 
     # Store old links
     old_links = []
@@ -471,10 +502,26 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
         old_links.extend(group.index.tolist())
 
         # Aggregate link properties
-        agg_link = {
-            'bus0': group_key[0] if len(group_key) >= 1 else None,
-            'bus1': group_key[1] if len(group_key) >= 2 else None,
-        }
+        if not directional:
+            # For non-directional, use the normalized bus pair
+            bus_pair = group_key[0] if not isinstance(group_key, tuple) or len(group_key) == 1 else group_key[0]
+            if isinstance(bus_pair, tuple):
+                agg_link = {
+                    'bus0': bus_pair[0],
+                    'bus1': bus_pair[1],
+                }
+            else:
+                # Fallback
+                agg_link = {
+                    'bus0': group['region0'].iloc[0],
+                    'bus1': group['region1'].iloc[0],
+                }
+        else:
+            # For directional, use the original orientation
+            agg_link = {
+                'bus0': group_key[0] if len(group_key) >= 1 else None,
+                'bus1': group_key[1] if len(group_key) >= 2 else None,
+            }
 
         # Aggregate p_nom
         p_nom_rule = link_config.get('p_nom', 'sum')
@@ -674,6 +721,191 @@ def _create_regional_loads(network, region_column, demand_file, province_mapping
                 network.add("Load", load_name, **load_params)
 
 
+def _aggregate_regions_by_group(network, config, group_column, province_mapping):
+    """
+    Perform second-level aggregation from regions to groups.
+
+    This function aggregates regional buses into group-level buses based on the
+    group_column from province_mapping (e.g., 'group1' or 'group2').
+
+    Parameters:
+    -----------
+    network : pypsa.Network
+        Network already aggregated at regional level
+    config : dict
+        Configuration dictionary
+    group_column : str
+        Column name in province_mapping for group aggregation (e.g., 'group1')
+    province_mapping : dict
+        Province mapping dictionary
+
+    Returns:
+    --------
+    pypsa.Network : Network aggregated at group level
+    """
+    # Get province_mapping dataframe from config
+    province_mapping_df = config.get('province_mapping_df')
+    if province_mapping_df is None:
+        print(f"[warn] province_mapping_df not found in config. Skipping group aggregation.")
+        return network
+    if group_column not in province_mapping_df.columns:
+        print(f"[warn] Group column '{group_column}' not found in province_mapping. Skipping group aggregation.")
+        return network
+
+    # Create mapping from region (short name) to group
+    region_to_group = {}
+    for _, row in province_mapping_df.iterrows():
+        short = row.get('short')
+        group = row.get(group_column)
+        if pd.notna(short) and pd.notna(group):
+            region_to_group[str(short).strip()] = str(group).strip()
+
+    if not region_to_group:
+        print(f"[warn] No valid region-to-group mapping found. Skipping group aggregation.")
+        return network
+
+    # Add group column to buses
+    network.buses['group'] = network.buses.index.map(region_to_group)
+
+    # Also add group column to generators, loads for tracking
+    if 'bus' in network.generators.columns:
+        network.generators['group'] = network.generators['bus'].map(region_to_group)
+    if 'bus' in network.loads.columns:
+        network.loads['group'] = network.loads['bus'].map(region_to_group)
+
+    # Get regional aggregation config (reuse line/link settings)
+    regional_config = config.get('regional_aggregation', {})
+
+    # Create bus-to-group mapping
+    bus_to_group = {}
+    for bus_name in network.buses.index:
+        group = network.buses.loc[bus_name, 'group']
+        if pd.notna(group):
+            bus_to_group[bus_name] = group
+
+    groups = set(bus_to_group.values())
+    print(f"[info] Found {len(groups)} unique groups: {sorted(groups)}")
+
+    # Aggregate buses by group (use 'group' as the region_column equivalent)
+    _aggregate_buses_by_region(network, 'group', groups, bus_to_group)
+
+    # Map generators to group buses
+    _map_generators_to_regional_buses(network, 'group', {})
+
+    # Aggregate lines by group pairs
+    if len(network.lines) > 0:
+        _aggregate_lines_by_region(network, 'group',
+                                   regional_config.get('lines', {}),
+                                   bus_to_group)
+
+    # Aggregate links by group pairs
+    if len(network.links) > 0:
+        _aggregate_links_by_region(network, 'group',
+                                   regional_config.get('links', {}),
+                                   bus_to_group)
+
+    # Optionally aggregate generators by carrier and group
+    if regional_config.get('aggregate_by_carrier', False):
+        from libs.aggregators import aggregate_generators_by_carrier_and_region
+        network = aggregate_generators_by_carrier_and_region(network, config, 'group', {})
+
+    # Aggregate loads by group (sum loads within each group)
+    load_carrier = regional_config.get('load_carrier', None)
+    if load_carrier == "":
+        load_carrier = None
+
+    # Create mapping from old buses (regional names) to groups
+    # At this point, loads have regional bus names, but we need to map them to groups
+    bus_to_group_for_loads = {}
+    for bus_name in network.buses.index:
+        # Buses are now group names after aggregation
+        bus_to_group_for_loads[bus_name] = bus_name
+
+    # Also need to map the OLD regional bus names to groups
+    for region, group in region_to_group.items():
+        bus_to_group_for_loads[region] = group
+
+    # Group loads by their group
+    old_loads = []
+    group_loads = {}
+
+    for load_name in network.loads.index:
+        load_bus = network.loads.loc[load_name, 'bus']
+
+        # Map load bus to group
+        if load_bus in bus_to_group_for_loads:
+            group = bus_to_group_for_loads[load_bus]
+        elif load_bus in groups:
+            # Already a group bus
+            group = load_bus
+        else:
+            # Can't map to any group, skip
+            print(f"[warn] Load '{load_name}' bus '{load_bus}' cannot be mapped to any group")
+            old_loads.append(load_name)
+            continue
+
+        if group not in group_loads:
+            group_loads[group] = {'p_set': 0}
+
+        # Sum p_set
+        p_set = network.loads.loc[load_name, 'p_set']
+        if pd.notna(p_set):
+            group_loads[group]['p_set'] += p_set
+
+        old_loads.append(load_name)
+
+    # Also aggregate time-series loads if they exist
+    load_timeseries = {}
+    if hasattr(network, 'loads_t') and hasattr(network.loads_t, 'p_set'):
+        if len(network.loads_t.p_set.columns) > 0:
+            # Group time-series by group
+            for load_name in network.loads_t.p_set.columns:
+                if load_name not in network.loads.index:
+                    continue
+                load_bus = network.loads.loc[load_name, 'bus']
+
+                # Map load bus to group
+                if load_bus in bus_to_group_for_loads:
+                    group = bus_to_group_for_loads[load_bus]
+                elif load_bus in groups:
+                    group = load_bus
+                else:
+                    continue
+
+                if group not in load_timeseries:
+                    load_timeseries[group] = network.loads_t.p_set[load_name].copy()
+                else:
+                    load_timeseries[group] += network.loads_t.p_set[load_name]
+
+    # Remove old loads
+    for load_name in old_loads:
+        network.remove("Load", load_name)
+
+    # Add aggregated loads for each group
+    for group in groups:
+        load_name = f"load_{group}"
+
+        # Get aggregated p_set for this group (or 0 if no loads)
+        p_set_value = group_loads.get(group, {}).get('p_set', 0)
+
+        load_params = {
+            'bus': group,
+            'p_set': p_set_value,
+        }
+        if load_carrier:
+            load_params['carrier'] = load_carrier
+
+        network.add("Load", load_name, **load_params)
+
+        # Add time-series if exists
+        if group in load_timeseries:
+            network.loads_t.p_set[load_name] = load_timeseries[group]
+
+    print(f"[info] Created {len(groups)} group-level loads")
+
+    return network
+
+
 def aggregate_network_by_region(network, config):
     """
     Main function to aggregate entire network by region.
@@ -716,6 +948,11 @@ def aggregate_network_by_region(network, config):
     province_mapping_data = config.get('province_mapping')
     province_mapping = load_province_mapping(province_mapping_file, province_mapping_data)
 
+    # Check if regional aggregation is enabled
+    if not regional_config.get('aggregate_by_region', True):
+        print("[info] Regional aggregation disabled (aggregate_by_region=False)")
+        return network
+
     print(f"[info] Starting regional aggregation by '{region_column}'...")
 
     # Step 1: Clean duplicate columns
@@ -746,7 +983,7 @@ def aggregate_network_by_region(network, config):
                                    bus_to_region)
 
     # Step 5: Optionally aggregate generators by carrier and region
-    if regional_config.get('aggregate_generators_by_carrier', False):
+    if regional_config.get('aggregate_by_carrier', False):
         from libs.aggregators import aggregate_generators_by_carrier_and_region
         network = aggregate_generators_by_carrier_and_region(network, config, region_column, province_mapping)
 
@@ -761,6 +998,13 @@ def aggregate_network_by_region(network, config):
     )
 
     print("[info] Regional aggregation complete")
+
+    # Step 7: Optionally aggregate regions by group (second-level aggregation)
+    if regional_config.get('aggregate_regions_by_group', False):
+        region_groups_column = regional_config.get('region_groups', 'group1')
+        print(f"[info] Starting group-level aggregation by '{region_groups_column}'...")
+        network = _aggregate_regions_by_group(network, config, region_groups_column, province_mapping)
+        print("[info] Group-level aggregation complete")
 
     # Restore dimension names in case they were dropped during aggregation
     _ensure_named_dimensions(network)
