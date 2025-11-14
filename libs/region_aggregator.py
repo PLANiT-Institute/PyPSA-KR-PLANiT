@@ -524,22 +524,37 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
             }
 
         # Aggregate p_nom
-        p_nom_rule = link_config.get('p_nom', 'sum')
-        if p_nom_rule == 'sum':
+        p_nom_rule = link_config.get('p_nom_rule', 'sum')
+        unlimited_capacity = link_config.get('unlimited_capacity', 1e6)  # Default 1,000,000 MW
+
+        if p_nom_rule == 'unlimited':
+            # Always use unlimited capacity, ignore original p_nom values
+            agg_link['p_nom'] = unlimited_capacity
+        elif p_nom_rule == 'sum':
             agg_link['p_nom'] = group['p_nom'].sum()
+            # If aggregated p_nom is 0, set to unlimited capacity
+            if agg_link['p_nom'] == 0:
+                agg_link['p_nom'] = unlimited_capacity
         elif p_nom_rule == 'max':
             agg_link['p_nom'] = group['p_nom'].max()
+            # If aggregated p_nom is 0, set to unlimited capacity
+            if agg_link['p_nom'] == 0:
+                agg_link['p_nom'] = unlimited_capacity
         else:
+            # keep_original or other
             agg_link['p_nom'] = group['p_nom'].iloc[0]
-
-        # If aggregated p_nom is 0, set to unlimited capacity
-        # (large value to represent no transmission constraint)
-        if agg_link['p_nom'] == 0:
-            unlimited_capacity = link_config.get('unlimited_capacity', 1e6)  # Default 1,000,000 MW
-            agg_link['p_nom'] = unlimited_capacity
+            # If aggregated p_nom is 0, set to unlimited capacity
+            if agg_link['p_nom'] == 0:
+                agg_link['p_nom'] = unlimited_capacity
 
         # Set efficiency (100% or from config)
         agg_link['efficiency'] = default_efficiency
+
+        # For non-directional links, allow bidirectional flow
+        if not directional:
+            # Allow flow in both directions by setting p_min_pu = -1
+            # This means the link can flow from bus0→bus1 (positive) or bus1→bus0 (negative)
+            agg_link['p_min_pu'] = -1.0
 
         # Aggregate length
         if 'length' in group.columns:
