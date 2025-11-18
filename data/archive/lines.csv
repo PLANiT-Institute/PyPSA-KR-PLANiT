@@ -1,4 +1,4 @@
-name,bus0,bus1,length,circuits,r,x,b,s_nom,num_parallel,v_nom
+name,bus0,bus1,length,num_parallel,r,x,b,s_nom,num_parallel,v_nom
 0,0,1,185.0521748,1,9.252608738,46.26304369,0,,1,765000
 1,3,3,7.144812632,1,0.357240632,1.786203158,0,,1,154000
 2,51,4,4.359830582,1,0.217991529,1.089957646,0,,1,154000

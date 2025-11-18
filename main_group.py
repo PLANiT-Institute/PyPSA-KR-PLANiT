@@ -25,6 +25,11 @@ python main_group.py
 Configuration:
 --------------
 All settings are in config/config_group.xlsx:
+- modelling_setting sheet: Temporal resolution, time range, and modeling year
+  - year: Year to model (e.g., 2024)
+  - weights: Temporal aggregation factor (e.g., 4 = 4-hour snapshots instead of 1-hour)
+  - snapshot_start: Starting snapshot index (0-based)
+  - snapshot_end: Ending snapshot index (exclusive)
 - regional_aggregation sheet: Main aggregation settings
   - aggregate_by_region: Enable regional aggregation (TRUE/FALSE)
   - aggregate_by_carrier: Merge generators by carrier within region (TRUE/FALSE)
@@ -59,6 +64,7 @@ from libs.generator_p_set import set_generator_p_set
 from libs.energy_constraints import apply_cf_energy_constraints
 from libs.visualization import plot_generation_by_carrier, plot_link_and_line_flows, print_link_and_line_flow_analysis
 from libs.region_aggregator import aggregate_network_by_region
+from libs.resample import resample_network, get_optimization_snapshots
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -73,7 +79,10 @@ config_path = 'config/config_group.xlsx'
 
 config = load_config(config_path)
 
-year = 2024
+# Get year from modelling settings
+modelling_settings = config.get('modelling_setting', {})
+year = modelling_settings.get('year')  # Default to 2024 if not specified
+print(f"[info] Modeling year: {year}")
 
 # Load network
 network = load_network(config)
@@ -104,7 +113,7 @@ network = standardize_carrier_names(network, carrier_mapping)
 
 # Set p_set for solar and wind generators (AFTER standardization and attributes)
 # This must come AFTER carrier standardization so carrier names are correct
-network = set_generator_p_set(network, carrier_list=['solar', 'wind'])
+# network = set_generator_p_set(network, carrier_list=['solar', 'wind'])
 
 # Apply carrier-specific generator attributes (AFTER carrier standardization)
 # This sets p_min_pu, p_max_pu, etc. for each carrier type from config
@@ -116,9 +125,22 @@ network = apply_generator_attributes(network, generator_attributes)
 storage_unit_attributes = config.get('storage_unit_attributes', {})
 network = apply_storage_unit_attributes(network, storage_unit_attributes)
 
-# Define snapshot range for optimization
-# Use the first 48 snapshots from the network
-optimization_snapshots = network.snapshots[:48]
+# Apply modelling settings (temporal resampling and snapshot selection)
+# modelling_settings already loaded at the beginning of main
+weights = modelling_settings.get('weights', 1)  # Default to 1 hour (no resampling)
+snapshot_start = modelling_settings.get('snapshot_start', 0)
+snapshot_end = modelling_settings.get('snapshot_end', len(network.snapshots))
+
+# Resample network to coarser temporal resolution if weights > 1
+network = resample_network(network, weights=weights)
+
+# Get optimization snapshots with adjusted indices for resampling
+optimization_snapshots = get_optimization_snapshots(
+    network,
+    snapshot_start=snapshot_start,
+    snapshot_end=snapshot_end,
+    weights=weights
+)
 
 # Apply capacity factor energy constraints (max_cf, min_cf → e_sum_max, e_sum_min)
 # This must be called AFTER snapshots are defined and BEFORE optimization

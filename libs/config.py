@@ -219,4 +219,25 @@ def load_config_from_excel(excel_path):
     except Exception:
         pass  # Sheet doesn't exist, skip
 
+    # Load modelling settings (if sheet exists)
+    try:
+        df_modelling_setting = pd.read_excel(excel_path, sheet_name='modelling_setting')
+        config['modelling_setting'] = {}
+        for _, row in df_modelling_setting.iterrows():
+            attribute = row['attributes']
+            value = row['value']
+            # Convert to appropriate type
+            if pd.notna(value):
+                # Try to convert to int first, then float
+                try:
+                    value = int(value)
+                except (ValueError, TypeError):
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        pass  # Keep as string
+            config['modelling_setting'][attribute] = value
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
     return config

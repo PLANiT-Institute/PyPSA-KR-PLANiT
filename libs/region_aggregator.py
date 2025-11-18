@@ -345,18 +345,18 @@ def _aggregate_lines_by_region(network, region_column, line_config, bus_to_regio
         if len(group_key) >= 3:
             agg_line['v_nom'] = group_key[2]
 
-        # Aggregate circuits
-        circuits_rule = line_config.get('circuits', 'sum')
-        if circuits_rule == 'sum':
-            total_circuits = group['circuits'].sum()
-        elif circuits_rule == 'max':
-            total_circuits = group['circuits'].max()
-        elif circuits_rule == 'mean':
-            total_circuits = group['circuits'].mean()
+        # Aggregate num_parallel
+        num_parallel_rule = line_config.get('num_parallel', 'sum')
+        if num_parallel_rule == 'sum':
+            total_num_parallel = group['num_parallel'].sum()
+        elif num_parallel_rule == 'max':
+            total_num_parallel = group['num_parallel'].max()
+        elif num_parallel_rule == 'mean':
+            total_num_parallel = group['num_parallel'].mean()
         else:
-            total_circuits = group['circuits'].sum()
+            total_num_parallel = group['num_parallel'].sum()
 
-        agg_line['num_parallel'] = total_circuits
+        agg_line['num_parallel'] = total_num_parallel
 
         # Aggregate s_nom
         s_nom_rule = line_config.get('s_nom', 'keep_original')
@@ -364,16 +364,16 @@ def _aggregate_lines_by_region(network, region_column, line_config, bus_to_regio
             agg_line['s_nom'] = group['s_nom'].sum()
         elif s_nom_rule == 'max':
             agg_line['s_nom'] = group['s_nom'].max()
-        elif s_nom_rule == 'scale_by_circuits':
-            agg_line['s_nom'] = group['s_nom'].iloc[0] * total_circuits
+        elif s_nom_rule == 'scale_by_num_parallel':
+            agg_line['s_nom'] = group['s_nom'].iloc[0] * total_num_parallel
         else:  # keep_original
             agg_line['s_nom'] = group['s_nom'].iloc[0]
 
         # Aggregate impedances (r, x, b)
-        impedance_rule = line_config.get('impedance', 'weighted_by_circuits')
-        if impedance_rule == 'weighted_by_circuits':
-            # Weighted average by circuits
-            weights = group['circuits']
+        impedance_rule = line_config.get('impedance', 'weighted_by_num_parallel')
+        if impedance_rule == 'weighted_by_num_parallel':
+            # Weighted average by num_parallel
+            weights = group['num_parallel']
             weight_sum = weights.sum()
             if weight_sum > 0:
                 agg_line['r'] = (group['r'] * weights).sum() / weight_sum
@@ -549,6 +549,11 @@ def _aggregate_links_by_region(network, region_column, link_config, bus_to_regio
 
         # Set efficiency (100% or from config)
         agg_link['efficiency'] = default_efficiency
+
+        # Add marginal cost if specified in config (to prevent circular flows)
+        marginal_cost = link_config.get('marginal_cost', 0)
+        if marginal_cost > 0:
+            agg_link['marginal_cost'] = marginal_cost
 
         # For non-directional links, allow bidirectional flow
         if not directional:

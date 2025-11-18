@@ -7,7 +7,7 @@ energy sum constraints (e_sum_max, e_sum_min) for generators.
 import pandas as pd
 
 
-def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
+def apply_cf_energy_constraints(network, generator_attributes, snapshots=None, snapshot_weightings=None):
     """
     Apply energy sum constraints based on capacity factor limits.
 
@@ -16,10 +16,10 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
 
     Formula:
     --------
-    e_sum_max = p_nom × max_cf × num_hours
-    e_sum_min = p_nom × min_cf × num_hours
+    e_sum_max = p_nom × max_cf × total_hours
+    e_sum_min = p_nom × min_cf × total_hours
 
-    Where num_hours is the number of snapshots (assuming hourly resolution).
+    Where total_hours is calculated from snapshot weightings (duration of each snapshot).
 
     Parameters:
     -----------
@@ -30,6 +30,8 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
     snapshots : pd.Index or None
         Snapshots for which to calculate energy constraints.
         If None, uses all network snapshots.
+    snapshot_weightings : pd.Series or None
+        Duration of each snapshot in hours. If None, infers from snapshot frequency.
 
     Returns:
     --------
@@ -43,10 +45,23 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
     if snapshots is None:
         snapshots = network.snapshots
 
-    # Number of hours in the snapshot period (assuming hourly resolution)
-    num_hours = len(snapshots)
+    # Calculate total hours from snapshot weightings
+    if snapshot_weightings is not None:
+        total_hours = snapshot_weightings.sum()
+    elif hasattr(network, 'snapshot_weightings') and not network.snapshot_weightings.empty:
+        # Use network's snapshot weightings if available
+        total_hours = network.snapshot_weightings.loc[snapshots, 'generators'].sum()
+    else:
+        # Infer from snapshot frequency (time between snapshots)
+        if len(snapshots) > 1:
+            # Calculate time difference between first two snapshots
+            freq = (snapshots[1] - snapshots[0]).total_seconds() / 3600  # convert to hours
+            total_hours = len(snapshots) * freq
+        else:
+            # Single snapshot, assume 1 hour
+            total_hours = 1.0
 
-    print(f"[info] Applying capacity factor energy constraints for {num_hours} snapshots...")
+    print(f"[info] Applying capacity factor energy constraints for {len(snapshots)} snapshots ({total_hours:.1f} total hours)...")
 
     # Initialize columns if they don't exist
     if 'e_sum_max' not in network.generators.columns:
@@ -73,11 +88,11 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
             max_cf = attributes['max_cf']
             for gen in carrier_gens:
                 p_nom = network.generators.loc[gen, 'p_nom']
-                e_sum_max = p_nom * max_cf * num_hours
+                e_sum_max = p_nom * max_cf * total_hours
                 network.generators.loc[gen, 'e_sum_max'] = e_sum_max
 
             total_p_nom = network.generators.loc[carrier_gens, 'p_nom'].sum()
-            total_e_max = total_p_nom * max_cf * num_hours
+            total_e_max = total_p_nom * max_cf * total_hours
             constraints_applied.append(f"  {carrier}: max_cf={max_cf:.2f} → e_sum_max={total_e_max:.0f} MWh total")
 
         # Apply min_cf constraint
@@ -85,11 +100,11 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None):
             min_cf = attributes['min_cf']
             for gen in carrier_gens:
                 p_nom = network.generators.loc[gen, 'p_nom']
-                e_sum_min = p_nom * min_cf * num_hours
+                e_sum_min = p_nom * min_cf * total_hours
                 network.generators.loc[gen, 'e_sum_min'] = e_sum_min
 
             total_p_nom = network.generators.loc[carrier_gens, 'p_nom'].sum()
-            total_e_min = total_p_nom * min_cf * num_hours
+            total_e_min = total_p_nom * min_cf * total_hours
             constraints_applied.append(f"  {carrier}: min_cf={min_cf:.2f} → e_sum_min={total_e_min:.0f} MWh total")
 
     if constraints_applied:
