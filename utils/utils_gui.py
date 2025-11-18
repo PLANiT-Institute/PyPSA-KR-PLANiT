@@ -142,7 +142,7 @@ class UtilsGUI:
 
         subtitle_label = ttk.Label(
             title_frame,
-            text="Run any utility tool with a click - 11 tools available",
+            text="Run any utility tool with a click - 12 tools available",
             font=("Helvetica", 10)
         )
         subtitle_label.pack()
@@ -193,6 +193,8 @@ class UtilsGUI:
         self.create_unique_names_tab()
         self.create_province_mapper_tab()
         self.create_fill_missing_tab()
+        self.create_resample_rules_tab()
+        self.create_diagnostic_tab()
 
         # Show first tab by default
         if self.tabs:
@@ -1286,6 +1288,348 @@ Any unmapped province names will be reported for manual addition to mapping file
                 sys.stderr = self.original_stderr
 
         self.run_in_thread(task)
+
+    def create_resample_rules_tab(self):
+        """Create Resample Rules Template Generator tab."""
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Resample Rules", "⏱️", tab)
+
+        ttk.Label(main_frame, text="Generate template for temporal resampling rules",
+                 font=("Helvetica", 10, "italic")).pack(pady=5, padx=10)
+
+        # Info frame
+        info_frame = ttk.LabelFrame(main_frame, text="About", padding="10")
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        info_text = """This tool generates a template 'resample_rules' sheet for config_group.xlsx.
+
+The resample_rules sheet controls how PyPSA network data is resampled when changing
+temporal resolution (e.g., from 1-hour to 4-hour snapshots).
+
+Rules include:
+  • mean: Average values over period (for time-series like solar availability)
+  • sum: Sum values over period (for energy flows like hydro inflow)
+  • max/min: Take maximum/minimum (for conservative estimates)
+  • scale: Multiply by weights (for per-snapshot rates like ramp limits)
+  • fixed: Set to specific value
+  • skip: Do not modify
+
+Carrier-Specific Rules:
+  • Leave 'carrier' column empty for default (applies to all carriers)
+  • Specify carrier name (e.g., 'solar', 'nuclear') to override for that carrier only
+  • Example: Default uses 'mean', but solar/wind use 'max' for conservative estimates
+
+The generated template includes all critical attributes and carrier-specific examples."""
+
+        ttk.Label(info_frame, text=info_text, justify=tk.LEFT, wraplength=700).pack(anchor=tk.W)
+
+        # Output settings
+        output_frame = ttk.LabelFrame(main_frame, text="Output Settings", padding="10")
+        output_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(output_frame, text="Output File:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.resample_output_var = tk.StringVar(value="resample_rules_template.xlsx")
+        ttk.Entry(output_frame, textvariable=self.resample_output_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(output_frame, text="Browse...",
+                  command=lambda: self.browse_save_file(self.resample_output_var,
+                  [("Excel files", "*.xlsx"), ("All files", "*.*")])).grid(row=0, column=2)
+
+        # Actions
+        action_frame = ttk.Frame(main_frame, padding="10")
+        action_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ttk.Button(action_frame, text="📄 Generate Template",
+                  command=self.run_resample_rules_generator,
+                  style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(action_frame, text="📖 View Documentation",
+                  command=self.view_resample_docs).pack(side=tk.LEFT, padx=5)
+
+        # Quick reference
+        ref_frame = ttk.LabelFrame(main_frame, text="Quick Reference", padding="10")
+        ref_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=10)
+
+        ref_text = scrolledtext.ScrolledText(ref_frame, height=15, width=90, wrap=tk.WORD)
+        ref_text.pack(fill=tk.BOTH, expand=True)
+
+        reference = """CRITICAL ATTRIBUTES THAT NEED SCALING:
+
+1. Ramp Limits (must multiply by weights):
+   - generators.ramp_limit_up/down
+   - storage_units.ramp_limit_up/down
+   - links.ramp_limit_up/down
+   → PyPSA applies these per snapshot, not per hour!
+
+2. Standing Losses (must multiply by weights):
+   - storage_units.standing_loss
+   - stores.standing_loss
+   → Specified as loss per hour, must scale to per snapshot
+
+TIME-SERIES RESAMPLING:
+   - generators_t.p_max_pu: Use 'mean' (or 'max' for conservative)
+   - loads_t.p_set: Use 'mean'
+   - storage_units_t.inflow: Use 'sum' (total energy)
+
+After generating the template:
+1. Open resample_rules_template.xlsx
+2. Copy the 'resample_rules' sheet
+3. Paste into your config_group.xlsx
+4. Customize rules as needed (change mean→max, add skip rules, etc.)
+5. Run your model with weights>1 in modelling_setting sheet"""
+
+        ref_text.insert(tk.END, reference)
+        ref_text.config(state=tk.DISABLED)
+
+    def run_resample_rules_generator(self):
+        """Run the resample rules template generator."""
+        def task():
+            try:
+                sys.stdout = RedirectText(self.output_text)
+                sys.stderr = RedirectText(self.output_text)
+
+                output_file = self.resample_output_var.get()
+
+                if not output_file:
+                    self.log("✗ Please specify output file")
+                    return
+
+                self.log("=" * 80)
+                self.log("GENERATING RESAMPLE RULES TEMPLATE")
+                self.log("=" * 80)
+                self.status_var.set("Generating template...")
+
+                # Import and run the generator
+                import pandas as pd
+
+                # Create comprehensive resample rules
+                resample_rules = pd.DataFrame([
+                    # Time-series components - DEFAULT rules
+                    {'component': 'generators_t', 'attribute': 'p_max_pu', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Default: Average renewable availability'},
+                    # Carrier-specific examples
+                    {'component': 'generators_t', 'attribute': 'p_max_pu', 'carrier': 'solar', 'rule': 'max', 'value': None, 'notes': 'EXAMPLE: Solar uses max (conservative)'},
+                    {'component': 'generators_t', 'attribute': 'p_max_pu', 'carrier': 'wind', 'rule': 'max', 'value': None, 'notes': 'EXAMPLE: Wind uses max (conservative)'},
+
+                    # Other time-series
+                    {'component': 'generators_t', 'attribute': 'p_min_pu', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average minimum output'},
+                    {'component': 'generators_t', 'attribute': 'p_set', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average power setpoint'},
+                    {'component': 'generators_t', 'attribute': 'marginal_cost', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average marginal cost'},
+                    {'component': 'generators_t', 'attribute': 'fuel_cost', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average fuel cost'},
+                    {'component': 'loads_t', 'attribute': 'p_set', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average load demand'},
+                    {'component': 'storage_units_t', 'attribute': 'inflow', 'carrier': None, 'rule': 'sum', 'value': None, 'notes': 'Total inflow over period'},
+                    {'component': 'storage_units_t', 'attribute': 'p_max_pu', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average maximum power'},
+                    {'component': 'links_t', 'attribute': 'p_max_pu', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average link capacity'},
+                    {'component': 'links_t', 'attribute': 'efficiency', 'carrier': None, 'rule': 'mean', 'value': None, 'notes': 'Average efficiency'},
+
+                    # Static attributes - scaling
+                    {'component': 'generators', 'attribute': 'ramp_limit_up', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'CRITICAL: Scale by weights'},
+                    {'component': 'generators', 'attribute': 'ramp_limit_down', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'CRITICAL: Scale by weights'},
+                    {'component': 'generators', 'attribute': 'ramp_limit_start_up', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                    {'component': 'generators', 'attribute': 'ramp_limit_shut_down', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                    {'component': 'storage_units', 'attribute': 'ramp_limit_up', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                    {'component': 'storage_units', 'attribute': 'ramp_limit_down', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                    {'component': 'storage_units', 'attribute': 'standing_loss', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'CRITICAL: Per hour → per snapshot'},
+                    {'component': 'stores', 'attribute': 'standing_loss', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'CRITICAL: Per hour → per snapshot'},
+                    {'component': 'links', 'attribute': 'ramp_limit_up', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                    {'component': 'links', 'attribute': 'ramp_limit_down', 'carrier': None, 'rule': 'scale', 'value': None, 'notes': 'Scale by weights'},
+                ])
+
+                # Save to Excel
+                resample_rules.to_excel(output_file, index=False, sheet_name='resample_rules')
+
+                self.log(f"\n✓ Template generated successfully!")
+                self.log(f"  Output: {output_file}")
+                self.log(f"  Rows: {len(resample_rules)}")
+                self.log("\nNext steps:")
+                self.log("  1. Open the generated file in Excel")
+                self.log("  2. Copy the 'resample_rules' sheet")
+                self.log("  3. Paste into your config_group.xlsx")
+                self.log("  4. Customize rules as needed")
+                self.log("  5. See RESAMPLE_RULES_GUIDE.md for detailed documentation")
+
+                self.status_var.set(f"Template generated: {output_file}")
+                messagebox.showinfo("Success", f"Template generated successfully!\n\nSaved to: {output_file}")
+
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Template generation failed")
+                messagebox.showerror("Error", f"Failed to generate template:\n{e}")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
+    def view_resample_docs(self):
+        """Open the resample rules documentation."""
+        doc_path = Path(__file__).parent.parent / "RESAMPLE_RULES_GUIDE.md"
+        if doc_path.exists():
+            import webbrowser
+            webbrowser.open(str(doc_path))
+        else:
+            messagebox.showwarning("Documentation Not Found",
+                                 f"Documentation file not found:\n{doc_path}\n\n" +
+                                 "Please check the project root directory.")
+
+    def create_diagnostic_tab(self):
+        """Create Network Diagnostics tab."""
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Diagnostics", "🔍", tab)
+
+        ttk.Label(main_frame, text="Diagnose network before/after resampling to identify infeasibility causes",
+                 font=("Helvetica", 10, "italic")).pack(pady=5, padx=10)
+
+        # Info frame
+        info_frame = ttk.LabelFrame(main_frame, text="About", padding="10")
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        info_text = """This tool helps diagnose why resampling causes infeasibility.
+
+It analyzes:
+  • Snapshot frequency and total hours
+  • Generator capacity by carrier
+  • Renewable availability (p_max_pu) statistics
+  • Energy constraints (e_sum_max, e_sum_min)
+  • Load statistics (total energy, average, peak)
+  • Ramp limits
+  • Potential load-generation mismatches
+
+Use this to compare the network before and after resampling to identify what causes infeasibility."""
+
+        ttk.Label(info_frame, text=info_text, justify=tk.LEFT, wraplength=700).pack(anchor=tk.W)
+
+        # Network file input
+        input_frame = ttk.LabelFrame(main_frame, text="Network to Diagnose", padding="10")
+        input_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(input_frame, text="Network File (*.nc):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.diag_network_var = tk.StringVar(value="")
+        ttk.Entry(input_frame, textvariable=self.diag_network_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(input_frame, text="Browse...",
+                  command=lambda: self.browse_file(self.diag_network_var,
+                  [("NetCDF files", "*.nc"), ("All files", "*.*")])).grid(row=0, column=2)
+
+        ttk.Label(input_frame, text="Label:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.diag_label_var = tk.StringVar(value="Network Diagnosis")
+        ttk.Entry(input_frame, textvariable=self.diag_label_var, width=50).grid(row=1, column=1, columnspan=2, padx=5, sticky=tk.W)
+
+        # Actions
+        action_frame = ttk.Frame(main_frame, padding="10")
+        action_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ttk.Button(action_frame, text="🔍 Diagnose Network",
+                  command=self.run_network_diagnostics,
+                  style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(action_frame, text="📋 Copy to Clipboard",
+                  command=self.copy_output_to_clipboard).pack(side=tk.LEFT, padx=5)
+
+        # Usage instructions
+        usage_frame = ttk.LabelFrame(main_frame, text="How to Use", padding="10")
+        usage_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=10)
+
+        usage_text = scrolledtext.ScrolledText(usage_frame, height=20, width=90, wrap=tk.WORD)
+        usage_text.pack(fill=tk.BOTH, expand=True)
+
+        usage = """WORKFLOW TO DIAGNOSE INFEASIBILITY:
+
+1. Save your network BEFORE resampling:
+   In main_group.py, add this line before resample_network():
+
+   network.export_to_netcdf("network_before_resample.nc")
+
+2. Save your network AFTER resampling:
+   Add this line after resample_network():
+
+   network.export_to_netcdf("network_after_resample.nc")
+
+3. Run diagnostics on both:
+   • Load network_before_resample.nc, label it "Before Resampling"
+   • Click "Diagnose Network"
+   • Load network_after_resample.nc, label it "After Resampling"
+   • Click "Diagnose Network"
+
+4. Compare the outputs to find differences:
+   • Generator p_max_pu: Did averaging reduce renewable capacity too much?
+   • Energy constraints: Are e_sum_max/e_sum_min too restrictive?
+   • Load-generation mismatches: Any snapshots where gen < load?
+   • Ramp limits: Too restrictive after scaling?
+
+COMMON ISSUES:
+
+• p_max_pu averaging: Using 'mean' reduces renewable peaks
+  → Solution: Use 'max' rule for renewables in resample_rules
+
+• Energy constraints: e_sum_max/e_sum_min calculated before resampling
+  → Solution: Set them to 'default' rule in resample_rules
+
+• Load-generation mismatch: Peak load > available generation
+  → Solution: Check that loads are being resampled correctly
+
+• Ramp limits: Scaled too aggressively
+  → Solution: Check ramp_limit scaling rules"""
+
+        usage_text.insert(tk.END, usage)
+        usage_text.config(state=tk.DISABLED)
+
+    def run_network_diagnostics(self):
+        """Run network diagnostics."""
+        def task():
+            try:
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                network_file = self.diag_network_var.get()
+                label = self.diag_label_var.get()
+
+                if not network_file:
+                    self.log("✗ Please specify a network file")
+                    return
+
+                if not Path(network_file).exists():
+                    self.log(f"✗ File not found: {network_file}")
+                    return
+
+                self.status_var.set(f"Diagnosing network: {label}...")
+
+                # Import PyPSA and diagnostic module
+                import pypsa
+                from diagnose_resampling import diagnose_network
+
+                # Load network
+                self.log(f"Loading network from: {network_file}")
+                network = pypsa.Network(network_file)
+
+                # Run diagnostics
+                diagnose_network(network, label)
+
+                self.status_var.set(f"Diagnostics complete: {label}")
+
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Diagnostics failed")
+                messagebox.showerror("Error", f"Failed to run diagnostics:\n{e}")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
+    def copy_output_to_clipboard(self):
+        """Copy output console text to clipboard."""
+        try:
+            output_text = self.console.get("1.0", tk.END)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(output_text)
+            self.status_var.set("Output copied to clipboard")
+            messagebox.showinfo("Success", "Output copied to clipboard!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy to clipboard:\n{e}")
 
 
 def main():

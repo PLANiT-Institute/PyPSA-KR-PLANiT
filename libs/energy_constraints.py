@@ -69,13 +69,27 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None, s
     if 'e_sum_min' not in network.generators.columns:
         network.generators['e_sum_min'] = 0.0
 
+    generator_attributes = generator_attributes or {}
+    default_attrs = generator_attributes.get('default') or {}
+
+    def _resolve_cf(primary, fallback):
+        if primary is not None and pd.notna(primary):
+            return primary, 'carrier'
+        if fallback is not None and pd.notna(fallback):
+            return fallback, 'default'
+        return None, None
+
     # Track statistics
     constraints_applied = []
 
-    # Process each carrier
-    for carrier, attributes in generator_attributes.items():
-        if carrier == 'default':
-            continue
+    # Process each carrier that actually exists in the network
+    carriers_in_network = [
+        carrier for carrier in network.generators['carrier'].unique()
+        if pd.notna(carrier)
+    ]
+
+    for carrier in carriers_in_network:
+        attributes = generator_attributes.get(carrier, {})
 
         # Get generators for this carrier
         carrier_gens = network.generators[network.generators['carrier'] == carrier].index
@@ -83,9 +97,10 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None, s
         if len(carrier_gens) == 0:
             continue
 
-        # Apply max_cf constraint
-        if 'max_cf' in attributes and pd.notna(attributes['max_cf']):
-            max_cf = attributes['max_cf']
+        max_cf, max_source = _resolve_cf(attributes.get('max_cf'), default_attrs.get('max_cf'))
+        min_cf, min_source = _resolve_cf(attributes.get('min_cf'), default_attrs.get('min_cf'))
+
+        if max_cf is not None:
             for gen in carrier_gens:
                 p_nom = network.generators.loc[gen, 'p_nom']
                 e_sum_max = p_nom * max_cf * total_hours
@@ -93,11 +108,12 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None, s
 
             total_p_nom = network.generators.loc[carrier_gens, 'p_nom'].sum()
             total_e_max = total_p_nom * max_cf * total_hours
-            constraints_applied.append(f"  {carrier}: max_cf={max_cf:.2f} → e_sum_max={total_e_max:.0f} MWh total")
+            source_label = 'carrier-specific' if max_source == 'carrier' else 'default'
+            constraints_applied.append(
+                f"  {carrier}: max_cf={max_cf:.2f} ({source_label}) → e_sum_max={total_e_max:.0f} MWh total"
+            )
 
-        # Apply min_cf constraint
-        if 'min_cf' in attributes and pd.notna(attributes['min_cf']):
-            min_cf = attributes['min_cf']
+        if min_cf is not None:
             for gen in carrier_gens:
                 p_nom = network.generators.loc[gen, 'p_nom']
                 e_sum_min = p_nom * min_cf * total_hours
@@ -105,7 +121,10 @@ def apply_cf_energy_constraints(network, generator_attributes, snapshots=None, s
 
             total_p_nom = network.generators.loc[carrier_gens, 'p_nom'].sum()
             total_e_min = total_p_nom * min_cf * total_hours
-            constraints_applied.append(f"  {carrier}: min_cf={min_cf:.2f} → e_sum_min={total_e_min:.0f} MWh total")
+            source_label = 'carrier-specific' if min_source == 'carrier' else 'default'
+            constraints_applied.append(
+                f"  {carrier}: min_cf={min_cf:.2f} ({source_label}) → e_sum_min={total_e_min:.0f} MWh total"
+            )
 
     if constraints_applied:
         print(f"[info] Applied energy constraints to {len(constraints_applied)} carrier groups:")

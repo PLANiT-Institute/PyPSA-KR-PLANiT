@@ -43,6 +43,10 @@ def apply_generator_attributes(network, generator_attributes):
         default_attrs = generator_attributes['default']
         print(f"[info] Applying default attributes to ALL generators:")
         for attr, value in default_attrs.items():
+            # Skip p_max_pu if time-series version exists (don't overwrite time-series data!)
+            if attr == 'p_max_pu' and hasattr(network.generators_t, 'p_max_pu') and not network.generators_t.p_max_pu.empty:
+                print(f"  - {attr}: skipped (time-series exists)")
+                continue
             network.generators[attr] = value
             print(f"  - {attr} = {value}")
 
@@ -62,6 +66,10 @@ def apply_generator_attributes(network, generator_attributes):
 
         print(f"[info] Applying attributes to {len(carrier_gens)} {carrier} generators:")
         for attr, value in attributes.items():
+            # Skip p_max_pu if time-series version exists (don't overwrite time-series data!)
+            if attr == 'p_max_pu' and hasattr(network.generators_t, 'p_max_pu') and not network.generators_t.p_max_pu.empty:
+                print(f"  - {attr}: skipped (time-series exists)")
+                continue
             # Apply the attribute to all generators of this carrier
             network.generators.loc[carrier_gens, attr] = value
             print(f"  - {attr} = {value}")

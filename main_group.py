@@ -64,7 +64,7 @@ from libs.generator_p_set import set_generator_p_set
 from libs.energy_constraints import apply_cf_energy_constraints
 from libs.visualization import plot_generation_by_carrier, plot_link_and_line_flows, print_link_and_line_flow_analysis
 from libs.region_aggregator import aggregate_network_by_region
-from libs.resample import resample_network, get_optimization_snapshots
+from libs.resample import resample_network, limit_snapshots
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -125,29 +125,28 @@ network = apply_generator_attributes(network, generator_attributes)
 storage_unit_attributes = config.get('storage_unit_attributes', {})
 network = apply_storage_unit_attributes(network, storage_unit_attributes)
 
-# Apply modelling settings (temporal resampling and snapshot selection)
+# Apply modelling settings (snapshot limiting and temporal resampling)
 # modelling_settings already loaded at the beginning of main
 weights = modelling_settings.get('weights', 1)  # Default to 1 hour (no resampling)
-snapshot_start = modelling_settings.get('snapshot_start', 0)
-snapshot_end = modelling_settings.get('snapshot_end', len(network.snapshots))
+snapshot_start = modelling_settings.get('snapshot_start', None)  # Start date
+snapshot_end = modelling_settings.get('snapshot_end', None)  # Number of snapshots
 
-# Resample network to coarser temporal resolution if weights > 1
-network = resample_network(network, weights=weights)
+# Limit snapshots to specified range (before energy constraints and resampling)
+network = limit_snapshots(network, snapshot_start=snapshot_start, snapshot_end=snapshot_end)
 
-# Get optimization snapshots with adjusted indices for resampling
-optimization_snapshots = get_optimization_snapshots(
+# Apply capacity factor energy constraints (uses all snapshots)
+network = apply_cf_energy_constraints(network, generator_attributes, network.snapshots)
+
+# Resample network (both temporal and static components)
+resample_rules = config.get('resample_rules', None)
+network = resample_network(
     network,
-    snapshot_start=snapshot_start,
-    snapshot_end=snapshot_end,
-    weights=weights
+    weights=weights,
+    resample_rules=resample_rules,
 )
 
-# Apply capacity factor energy constraints (max_cf, min_cf → e_sum_max, e_sum_min)
-# This must be called AFTER snapshots are defined and BEFORE optimization
-network = apply_cf_energy_constraints(network, generator_attributes, optimization_snapshots)
-
-# Run optimization for only the specified snapshots
-status = network.optimize(snapshots=optimization_snapshots)
+# Run optimization on all resampled snapshots
+status = network.optimize()
 
 # Display chart only if optimization succeeded
 if status[0] == 'ok':
@@ -165,7 +164,7 @@ if status[0] == 'ok':
 
     fig = plot_generation_by_carrier(
         network,
-        snapshots=optimization_snapshots,
+        snapshots=network.snapshots,
         include_storage=True,
         title=f'Generation by Carrier - {agg_level} (Including Storage Discharge)',
         carriers_order=carriers_order
@@ -178,11 +177,11 @@ if status[0] == 'ok':
     print("="*80)
 
     # Create and show link/line flow chart
-    flow_fig = plot_link_and_line_flows(network, snapshots=optimization_snapshots)
+    flow_fig = plot_link_and_line_flows(network, snapshots=network.snapshots)
     if flow_fig:
         flow_fig.show()
 
     # Print detailed link/line flow analysis
-    print_link_and_line_flow_analysis(network, snapshots=optimization_snapshots)
+    print_link_and_line_flow_analysis(network, snapshots=network.snapshots)
 
     print("\n" + "="*80)

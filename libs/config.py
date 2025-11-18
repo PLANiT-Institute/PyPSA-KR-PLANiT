@@ -240,4 +240,12 @@ def load_config_from_excel(excel_path):
     except Exception:
         pass  # Sheet doesn't exist, skip
 
+    # Load resample rules (if sheet exists)
+    try:
+        df_resample_rules = pd.read_excel(excel_path, sheet_name='resample_rules')
+        # Store as DataFrame for easy iteration
+        config['resample_rules'] = df_resample_rules
+    except Exception:
+        pass  # Sheet doesn't exist, skip
+
     return config

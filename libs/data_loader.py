@@ -38,6 +38,33 @@ def load_network(config):
         network.generators['cc_group'] = network.generators['cc_group'].replace('', pd.NA)
         network.generators['cc_group'] = network.generators['cc_group'].replace(' ', pd.NA)
 
+    # Fix snapshots and all time-series indices to use dayfirst format
+    # IMPORTANT: Convert time-series indices FIRST, then convert network.snapshots
+    # Otherwise PyPSA will reindex and cause data loss!
+
+    # Step 1: Convert all time-series component indices FIRST
+    for attr in dir(network):
+        if not attr.endswith('_t'):
+            continue
+        component_t = getattr(network, attr)
+        if component_t is None:
+            continue
+
+        for ts_attr in dir(component_t):
+            if ts_attr.startswith('_'):
+                continue
+            df = getattr(component_t, ts_attr)
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    # Convert index in-place to DatetimeIndex with dayfirst
+                    df.index = pd.to_datetime(df.index, dayfirst=True)
+                    df.index.name = 'snapshot'
+
+    # Step 2: Now convert network.snapshots to match
+    if not isinstance(network.snapshots, pd.DatetimeIndex):
+        network.snapshots = pd.to_datetime(network.snapshots, dayfirst=True)
+        print(f"[info] Converted snapshots to DatetimeIndex with day-first format")
+
     print(f"Network loaded from {data_path}")
     return network
 

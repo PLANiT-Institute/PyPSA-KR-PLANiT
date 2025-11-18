@@ -1,181 +1,245 @@
 """
-Temporal resampling utilities for PyPSA networks.
-
-This module provides functions to resample PyPSA networks to different temporal resolutions
-(e.g., from 1-hour to 4-hour snapshots) to reduce computational complexity.
+Temporal resampling for PyPSA networks using built-in method.
 """
-import pypsa
+import pandas as pd
 
 
-def resample_network(network, weights=1):
+def limit_snapshots(network, snapshot_start=None, snapshot_end=None):
     """
-    Resample network to coarser temporal resolution using pandas resample.
+    Limit network snapshots to a specific date range.
 
-    This function reduces the temporal resolution of a PyPSA network by resampling
-    all time-series data using pandas resample() method. It automatically applies
-    appropriate aggregation methods (mean for ratios/prices, sum for energy).
+    Parameters:
+    -----------
+    network : pypsa.Network
+        The network to limit
+    snapshot_start : str or None
+        Start date in format 'YYYY-MM-DD HH:MM' or None to start from beginning
+    snapshot_end : int or None
+        Number of snapshots to include, or None for all remaining snapshots
+
+    Returns:
+    --------
+    pypsa.Network
+        The network with limited snapshots (modified in place)
+    """
+    if snapshot_start is None and snapshot_end is None:
+        return network
+
+    print(f"[info] Limiting snapshots")
+    print(f"[info]   Original snapshots: {len(network.snapshots)}")
+
+    # Convert snapshots to DatetimeIndex if needed
+    if not isinstance(network.snapshots, pd.DatetimeIndex):
+        network.snapshots = pd.DatetimeIndex(network.snapshots)
+
+    # Find start index
+    if snapshot_start is not None:
+        # Parse date with day-first format (international standard: d/m/y)
+        start_date = pd.to_datetime(snapshot_start, dayfirst=True)
+        # Find the index of the first snapshot >= start_date
+        start_idx = network.snapshots.searchsorted(start_date)
+        print(f"[info]   Start date: {snapshot_start} -> {start_date} (index: {start_idx})")
+    else:
+        start_idx = 0
+
+    # Calculate end index
+    if snapshot_end is not None:
+        end_idx = start_idx + int(snapshot_end)
+        print(f"[info]   Number of snapshots: {snapshot_end} (end index: {end_idx})")
+    else:
+        end_idx = len(network.snapshots)
+
+    # Limit snapshots
+    print(f"[DEBUG] Before limiting: len={len(network.snapshots)}, range={network.snapshots[0]} to {network.snapshots[-1]}")
+    print(f"[DEBUG] Slicing [{start_idx}:{end_idx}]")
+    new_snapshots = network.snapshots[start_idx:end_idx]
+    print(f"[DEBUG] After slicing: len={len(new_snapshots)}, range={new_snapshots[0]} to {new_snapshots[-1]}")
+
+    # Limit all temporal data (_t components)
+    for attr in dir(network):
+        if not attr.endswith('_t'):
+            continue
+
+        component = getattr(network, attr)
+        if component is None:
+            continue
+
+        # Limit each time-series attribute
+        for ts_attr in dir(component):
+            if ts_attr.startswith('_'):
+                continue
+
+            df = getattr(component, ts_attr)
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                continue
+
+            # Limit the dataframe to the new snapshot range
+            limited_df = df.iloc[start_idx:end_idx]
+            setattr(component, ts_attr, limited_df)
+            print(f"[info]   {attr}.{ts_attr}: limited ({len(df)} -> {len(limited_df)} snapshots)")
+
+    # Update network snapshots and restore frequency
+    network.snapshots = new_snapshots
+
+    # Restore frequency after slicing (slicing loses freq attribute)
+    if network.snapshots.freq is None and len(network.snapshots) > 1:
+        inferred_freq = pd.infer_freq(network.snapshots)
+        if inferred_freq is not None:
+            network.snapshots = pd.DatetimeIndex(network.snapshots, freq=inferred_freq)
+
+    print(f"[info]   Limited snapshots: {len(network.snapshots)}")
+    print(f"[info]   Limited snapshot range: {network.snapshots[0]} to {network.snapshots[-1]}")
+    print(f"[info] Snapshot limiting complete")
+
+    return network
+
+
+def resample_network(network, weights=1, resample_rules=None, optimization_snapshots=None):
+    """
+    Resample network using PyPSA's built-in set_snapshots method.
 
     Parameters:
     -----------
     network : pypsa.Network
         The network to resample
     weights : int
-        Temporal aggregation factor in hours. For example:
-        - weights=1: No resampling (1-hour snapshots)
-        - weights=4: Resample to 4-hour snapshots
-        - weights=24: Resample to daily snapshots
+        Temporal aggregation factor in hours (e.g., 4 for 4-hour snapshots)
+    resample_rules : pd.DataFrame or None
+        DataFrame with resampling rules for static components
+    optimization_snapshots : pd.DatetimeIndex or None
+        Not used - kept for backwards compatibility
 
     Returns:
     --------
     pypsa.Network
-        The resampled network (modified in place, but also returned)
-
-    Examples:
-    ---------
-    >>> # Resample to 4-hour snapshots
-    >>> network = resample_network(network, weights=4)
-    >>> # 8760 hourly snapshots -> 2190 4-hourly snapshots
-
-    Notes:
-    ------
-    - The function modifies the network in place
-    - All time-series data is automatically resampled using appropriate aggregation
-    - Ratios and per-unit values use mean aggregation
-    - Energy and power values use mean aggregation (representing average over period)
-    - Costs use mean aggregation
+        The resampled network (network.snapshots already updated)
     """
     if weights <= 1:
-        # No resampling needed
         return network
 
     print(f"[info] Resampling network to {weights}-hour snapshots")
     print(f"[info]   Original snapshots: {len(network.snapshots)}")
+    print(f"[info]   Snapshot range: {network.snapshots[0]} to {network.snapshots[-1]}")
 
-    # Define resampling rule (e.g., '4H' for 4 hours)
-    resample_rule = f'{weights}H'
-
-    # Resample the network snapshots first
-    # Convert to DatetimeIndex if it isn't already
-    import pandas as pd
+    # Convert snapshots to DatetimeIndex if needed
     if not isinstance(network.snapshots, pd.DatetimeIndex):
-        # If snapshots are just integers or another index type, convert to datetime
         network.snapshots = pd.DatetimeIndex(network.snapshots)
 
-    network.snapshots = network.snapshots.to_series().resample(resample_rule).first().index
+    # Manually resample snapshots using pandas
+    resample_rule = f'{weights}h'
+    print(f"[info]   Resample rule: {resample_rule}")
+    new_snapshots = network.snapshots.to_series().resample(resample_rule).first().index
+    print(f"[info]   New snapshots count: {len(new_snapshots)}")
+
+    # Manually resample all temporal data to match new snapshots
+    for attr in dir(network):
+        if not attr.endswith('_t'):
+            continue
+
+        component = getattr(network, attr)
+        if component is None:
+            continue
+
+        for ts_attr in dir(component):
+            if ts_attr.startswith('_'):
+                continue
+
+            df = getattr(component, ts_attr)
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                continue
+
+            # Resample using mean
+            if isinstance(df.index, pd.DatetimeIndex):
+                resampled_df = df.resample(resample_rule).mean()
+                setattr(component, ts_attr, resampled_df)
+
+    # Update network snapshots directly (don't use set_snapshots!)
+    network.snapshots = new_snapshots
     print(f"[info]   Resampled snapshots: {len(network.snapshots)}")
 
-    # Resample all time-series data for generators
-    if hasattr(network, 'generators_t'):
-        for attr in dir(network.generators_t):
-            if not attr.startswith('_'):
-                df = getattr(network.generators_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    # Use mean for all generator time-series attributes
-                    setattr(network.generators_t, attr, df.resample(resample_rule).mean())
-
-    # Resample all time-series data for loads
-    if hasattr(network, 'loads_t'):
-        for attr in dir(network.loads_t):
-            if not attr.startswith('_'):
-                df = getattr(network.loads_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    # Use mean for load attributes (represents average power over period)
-                    setattr(network.loads_t, attr, df.resample(resample_rule).mean())
-
-    # Resample all time-series data for storage units
-    if hasattr(network, 'storage_units_t') and len(network.storage_units) > 0:
-        for attr in dir(network.storage_units_t):
-            if not attr.startswith('_'):
-                df = getattr(network.storage_units_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    setattr(network.storage_units_t, attr, df.resample(resample_rule).mean())
-
-    # Resample all time-series data for stores
-    if hasattr(network, 'stores_t') and len(network.stores) > 0:
-        for attr in dir(network.stores_t):
-            if not attr.startswith('_'):
-                df = getattr(network.stores_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    setattr(network.stores_t, attr, df.resample(resample_rule).mean())
-
-    # Resample all time-series data for links
-    if hasattr(network, 'links_t') and len(network.links) > 0:
-        for attr in dir(network.links_t):
-            if not attr.startswith('_'):
-                df = getattr(network.links_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    setattr(network.links_t, attr, df.resample(resample_rule).mean())
-
-    # Resample all time-series data for lines
-    if hasattr(network, 'lines_t') and len(network.lines) > 0:
-        for attr in dir(network.lines_t):
-            if not attr.startswith('_'):
-                df = getattr(network.lines_t, attr)
-                if hasattr(df, 'empty') and not df.empty:
-                    setattr(network.lines_t, attr, df.resample(resample_rule).mean())
-
-    # Scale ramp limits by temporal resolution factor
-    # Ramp limits are per unit change per time period, so they need to be scaled
-    # when the time period changes (e.g., 1h → 4h means ramp limit should be 4× larger)
-    ramp_attributes = ['ramp_limit_up', 'ramp_limit_down', 'ramp_limit_start_up', 'ramp_limit_shut_down']
-
-    if len(network.generators) > 0:
-        for attr in ramp_attributes:
-            if attr in network.generators.columns:
-                # Scale ramp limits by weights factor
-                network.generators[attr] = network.generators[attr] * weights
-                print(f"[info]   Scaled generator {attr} by factor of {weights}")
-
-    if len(network.storage_units) > 0:
-        for attr in ramp_attributes:
-            if attr in network.storage_units.columns:
-                # Scale ramp limits by weights factor
-                network.storage_units[attr] = network.storage_units[attr] * weights
-                print(f"[info]   Scaled storage_unit {attr} by factor of {weights}")
+    # Resample static component attributes based on resample_rules
+    if resample_rules is not None and not resample_rules.empty:
+        _resample_static_components(network, resample_rules, weights)
 
     print(f"[info] Resampling complete")
-
     return network
 
 
-def get_optimization_snapshots(network, snapshot_start=0, snapshot_end=None, weights=1):
+def _resample_static_components(network, resample_rules, weights):
     """
-    Get the snapshot range for optimization, accounting for resampling.
+    Resample static component attributes based on resample_rules.
 
     Parameters:
     -----------
     network : pypsa.Network
-        The network (should already be resampled if weights > 1)
-    snapshot_start : int
-        Starting snapshot index (in original resolution)
-    snapshot_end : int or None
-        Ending snapshot index (in original resolution). If None, uses all snapshots.
+        The network being modified
+    resample_rules : pd.DataFrame
+        DataFrame with columns: component, attribute, rule, value
     weights : int
-        Temporal aggregation factor used for resampling
-
-    Returns:
-    --------
-    pd.DatetimeIndex
-        The snapshots to use for optimization
-
-    Examples:
-    ---------
-    >>> # Get first 480 hours with 4-hour resampling
-    >>> snapshots = get_optimization_snapshots(network, 0, 480, weights=4)
-    >>> # Returns 120 snapshots (480 / 4)
+        Temporal aggregation factor
     """
-    if snapshot_end is None:
-        snapshot_end = len(network.snapshots) * weights
+    # Get rules for static components only (not ending with _t)
+    static_rules = resample_rules[~resample_rules['component'].str.endswith('_t')]
 
-    if weights > 1:
-        # Adjust snapshot indices for resampled data
-        adjusted_start = snapshot_start // weights
-        adjusted_end = snapshot_end // weights
-        optimization_snapshots = network.snapshots[adjusted_start:adjusted_end]
-        print(f"[info] Using snapshots {snapshot_start}:{snapshot_end} (original) = "
-              f"{adjusted_start}:{adjusted_end} (resampled, {len(optimization_snapshots)} snapshots)")
-    else:
-        optimization_snapshots = network.snapshots[snapshot_start:snapshot_end]
-        print(f"[info] Using snapshots {snapshot_start}:{snapshot_end} ({len(optimization_snapshots)} snapshots)")
+    if static_rules.empty:
+        return
 
-    return optimization_snapshots
+    # Group rules by component
+    rules_by_component = {}
+    for _, row in static_rules.iterrows():
+        component = row['component']
+        if component not in rules_by_component:
+            rules_by_component[component] = []
+        rules_by_component[component].append(row)
+
+    # Process each component
+    for component_name, rules in rules_by_component.items():
+        if not hasattr(network, component_name):
+            continue
+
+        component_df = getattr(network, component_name)
+        if len(component_df) == 0:
+            continue
+
+        for rule_row in rules:
+            attribute = rule_row['attribute']
+            rule = rule_row['rule']
+
+            if attribute not in component_df.columns:
+                continue
+
+            if rule == 'scale':
+                # Scale attribute by weights factor (e.g., ramp_limit_up)
+                component_df[attribute] = component_df[attribute] * weights
+                print(f"[info]   {component_name}.{attribute}: scaled by {weights}")
+
+            elif rule == 'fixed':
+                # Set to fixed value
+                fixed_value = rule_row.get('value')
+                if fixed_value is not None:
+                    component_df[attribute] = fixed_value
+                    print(f"[info]   {component_name}.{attribute}: set to {fixed_value}")
+
+            elif rule == 'default':
+                # Reset to PyPSA's default value
+                from pypsa import Network
+                temp_network = Network()
+                component_class = getattr(temp_network.components, component_name)
+                default_value = component_class.defaults.loc[attribute, 'default']
+
+                # Handle inf/-inf strings
+                if isinstance(default_value, str):
+                    if default_value == 'inf':
+                        default_value = float('inf')
+                    elif default_value == '-inf':
+                        default_value = float('-inf')
+
+                component_df[attribute] = default_value
+                print(f"[info]   {component_name}.{attribute}: reset to PyPSA default ({default_value})")
+
+            elif rule == 'skip':
+                continue
+
+            else:
+                print(f"[warn] Unknown rule '{rule}' for {component_name}.{attribute}")
+
