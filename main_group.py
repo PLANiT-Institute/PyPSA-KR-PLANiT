@@ -113,7 +113,7 @@ network = standardize_carrier_names(network, carrier_mapping)
 
 # Set p_set for solar and wind generators (AFTER standardization and attributes)
 # This must come AFTER carrier standardization so carrier names are correct
-network = set_generator_p_set(network, carrier_list=['solar', 'wind'])
+# network = set_generator_p_set(network, carrier_list=['solar', 'wind'])
 
 # Apply carrier-specific generator attributes (AFTER carrier standardization)
 # This sets p_min_pu, p_max_pu, etc. for each carrier type from config
@@ -185,3 +185,8 @@ if status[0] == 'ok':
     print_link_and_line_flow_analysis(network, snapshots=network.snapshots)
 
     print("\n" + "="*80)
+
+
+
+# 고민해야할 부분들
+# 태양광 및 재생에너지 용량 수정

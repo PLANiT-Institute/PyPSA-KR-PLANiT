@@ -142,7 +142,7 @@ class UtilsGUI:
 
         subtitle_label = ttk.Label(
             title_frame,
-            text="Run any utility tool with a click - 12 tools available",
+            text="Run any utility tool with a click - 13 tools available",
             font=("Helvetica", 10)
         )
         subtitle_label.pack()
@@ -195,6 +195,7 @@ class UtilsGUI:
         self.create_fill_missing_tab()
         self.create_resample_rules_tab()
         self.create_diagnostic_tab()
+        self.create_aggregate_facilities_tab()
 
         # Show first tab by default
         if self.tabs:
@@ -1630,6 +1631,355 @@ COMMON ISSUES:
             messagebox.showinfo("Success", "Output copied to clipboard!")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy to clipboard:\n{e}")
+
+    def create_aggregate_facilities_tab(self):
+        """Create Aggregate Facilities tab."""
+        tab = ttk.Frame(self.content_frame)
+        main_frame = self.create_scrollable_frame(tab)
+        self.add_tab("Aggregate Data", "📊", tab)
+
+        ttk.Label(main_frame, text="Aggregate generation facility data by any columns",
+                 font=("Helvetica", 10, "italic")).pack(pady=5, padx=10)
+
+        # File selection
+        file_frame = ttk.LabelFrame(main_frame, text="Files", padding="10")
+        file_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(file_frame, text="Input File:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.agg_input_var = tk.StringVar(value="data/raw/generation_by_facility.xlsx")
+        ttk.Entry(file_frame, textvariable=self.agg_input_var, width=50).grid(row=0, column=1, padx=5)
+        ttk.Button(file_frame, text="Browse",
+                  command=lambda: self.browse_file(self.agg_input_var,
+                  [("Excel/CSV", "*.xlsx *.xls *.csv"), ("All files", "*.*")])).grid(row=0, column=2)
+
+        ttk.Label(file_frame, text="Output File:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.agg_output_var = tk.StringVar(value="")
+        ttk.Entry(file_frame, textvariable=self.agg_output_var, width=50).grid(row=1, column=1, padx=5)
+        ttk.Button(file_frame, text="Browse",
+                  command=lambda: self.browse_save_file(self.agg_output_var,
+                  [("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All files", "*.*")])).grid(row=1, column=2)
+
+        # Load and inspect button
+        load_frame = ttk.Frame(main_frame, padding="5")
+        load_frame.pack(fill=tk.X, pady=5, padx=10)
+        ttk.Button(load_frame, text="📂 Load File and Inspect Columns",
+                  command=self.load_aggregate_file).pack()
+
+        # Filters section
+        filter_frame = ttk.LabelFrame(main_frame, text="Filters (Optional)", padding="10")
+        filter_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        # Container for filter rows
+        self.agg_filter_container = ttk.Frame(filter_frame)
+        self.agg_filter_container.pack(fill=tk.X, pady=5)
+        self.agg_filters = []  # Store filter widget references
+
+        ttk.Button(filter_frame, text="+ Add Filter",
+                  command=self.add_aggregate_filter).pack(pady=5)
+
+        # Group by section
+        groupby_frame = ttk.LabelFrame(main_frame, text="Group By (Aggregation Columns)", padding="10")
+        groupby_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(groupby_frame, text="Select columns to group by (checked columns will be used for aggregation):",
+                 font=("Helvetica", 9, "italic")).pack(anchor=tk.W, pady=2)
+
+        # Scrollable checkboxes for group by
+        groupby_canvas = tk.Canvas(groupby_frame, height=120, bg="white")
+        groupby_scrollbar = ttk.Scrollbar(groupby_frame, orient="vertical", command=groupby_canvas.yview)
+        self.agg_groupby_frame = ttk.Frame(groupby_canvas)
+
+        self.agg_groupby_frame.bind(
+            "<Configure>",
+            lambda e: groupby_canvas.configure(scrollregion=groupby_canvas.bbox("all"))
+        )
+
+        groupby_canvas.create_window((0, 0), window=self.agg_groupby_frame, anchor="nw")
+        groupby_canvas.configure(yscrollcommand=groupby_scrollbar.set)
+
+        groupby_canvas.pack(side="left", fill="both", expand=True)
+        groupby_scrollbar.pack(side="right", fill="y")
+
+        self.agg_groupby_vars = {}  # Dictionary to store checkbutton variables
+
+        # Name order section
+        name_order_frame = ttk.LabelFrame(main_frame, text="Name Column Order (Optional)", padding="10")
+        name_order_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(name_order_frame, text="Specify order of columns in generated name (e.g., 'carrier_province' vs 'province_carrier'):",
+                 font=("Helvetica", 9, "italic")).pack(anchor=tk.W, pady=2)
+
+        ttk.Label(name_order_frame, text="Enter column names in order, comma-separated (leave empty to use group-by order):",
+                 font=("Helvetica", 9)).pack(anchor=tk.W, pady=2)
+
+        self.agg_name_order_var = tk.StringVar(value="")
+        ttk.Entry(name_order_frame, textvariable=self.agg_name_order_var, width=50).pack(anchor=tk.W, pady=2, padx=5)
+
+        ttk.Label(name_order_frame, text="Example: 'carrier,province' will create names like 'solar_경남', 'wind_강원'",
+                 font=("Helvetica", 8), foreground="gray").pack(anchor=tk.W, pady=2)
+
+        # Aggregation column
+        agg_col_frame = ttk.LabelFrame(main_frame, text="Aggregation Settings", padding="10")
+        agg_col_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        ttk.Label(agg_col_frame, text="Column to Aggregate (sum):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.agg_column_var = tk.StringVar(value="p_nom")
+        self.agg_column_combo = ttk.Combobox(agg_col_frame, textvariable=self.agg_column_var,
+                                              state="readonly", width=20)
+        self.agg_column_combo.grid(row=0, column=1, padx=5, sticky=tk.W)
+
+        # Info section
+        info_frame = ttk.LabelFrame(main_frame, text="How It Works", padding="10")
+        info_frame.pack(fill=tk.X, pady=5, padx=10)
+
+        info_text = """1. Load File: Click "Load File and Inspect Columns" to see available columns
+2. Add Filters: Filter data by specific values (e.g., market=중앙, carrier=wind,solar)
+3. Group By: Select columns to aggregate by (e.g., province, carrier)
+4. Aggregate Column: Choose column to sum (default: p_nom)
+5. Run: Data will be grouped and summed, with names created from group values
+
+Example: Group by [province, carrier] will create names like "경남_solar", "강원_wind"
+         Single column groups create names like "경남", "강원" """
+
+        ttk.Label(info_frame, text=info_text, font=("Courier", 9), foreground="gray",
+                 justify=tk.LEFT, wraplength=800).pack(anchor=tk.W)
+
+        # Action buttons
+        action_frame = ttk.Frame(main_frame, padding="10")
+        action_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ttk.Button(action_frame, text="▶ Run Aggregation",
+                  command=self.run_aggregate_facilities,
+                  style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+
+    def load_aggregate_file(self):
+        """Load the aggregation input file and populate column options."""
+        input_file = self.agg_input_var.get()
+
+        if not input_file or not Path(input_file).exists():
+            messagebox.showerror("Error", f"File not found: {input_file}")
+            return
+
+        self.status_var.set("Loading file...")
+        self.log("\n" + "="*60)
+        self.log("LOADING AGGREGATION FILE")
+        self.log("="*60)
+
+        def task():
+            try:
+                from aggregate_facilities import read_input_file
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                # Read file
+                df = read_input_file(Path(input_file))
+                self.agg_loaded_df = df  # Store for later use
+
+                self.log(f"\n✓ File loaded successfully!")
+                self.log(f"  Rows: {len(df)}")
+                self.log(f"  Columns: {list(df.columns)}")
+
+                # Update UI with available columns
+                self.root.after(0, lambda: self.populate_aggregate_columns(df.columns))
+
+                self.status_var.set("File loaded successfully")
+                messagebox.showinfo("Success", f"File loaded!\n{len(df)} rows, {len(df.columns)} columns")
+
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Loading failed")
+                messagebox.showerror("Error", f"Failed to load file:\n{e}")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
+
+    def populate_aggregate_columns(self, columns):
+        """Populate column options after file is loaded."""
+        columns = list(columns)
+
+        # Update aggregation column combobox
+        self.agg_column_combo["values"] = columns
+        if "p_nom" in columns:
+            self.agg_column_var.set("p_nom")
+        elif columns:
+            self.agg_column_var.set(columns[0])
+
+        # Clear existing groupby checkboxes
+        for widget in self.agg_groupby_frame.winfo_children():
+            widget.destroy()
+        self.agg_groupby_vars.clear()
+
+        # Create checkboxes for group by (default: province and carrier)
+        defaults = ["province", "carrier"]
+        for i, col in enumerate(columns):
+            var = tk.BooleanVar(value=(col in defaults))
+            self.agg_groupby_vars[col] = var
+            cb = ttk.Checkbutton(self.agg_groupby_frame, text=col, variable=var)
+            cb.grid(row=i // 4, column=i % 4, sticky=tk.W, padx=10, pady=2)
+
+        # Update filter column options
+        for filter_widget in self.agg_filters:
+            if filter_widget and "column_combo" in filter_widget:
+                filter_widget["column_combo"]["values"] = columns
+
+    def add_aggregate_filter(self):
+        """Add a filter row for aggregation."""
+        if not hasattr(self, 'agg_loaded_df') or self.agg_loaded_df is None:
+            messagebox.showwarning("Warning", "Please load a file first")
+            return
+
+        row_idx = len(self.agg_filters)
+
+        frame = ttk.Frame(self.agg_filter_container)
+        frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(frame, text="Column:").pack(side=tk.LEFT, padx=5)
+
+        col_var = tk.StringVar()
+        col_combo = ttk.Combobox(frame, textvariable=col_var,
+                                  values=list(self.agg_loaded_df.columns),
+                                  state="readonly", width=15)
+        col_combo.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(frame, text="Values (comma-separated):").pack(side=tk.LEFT, padx=5)
+
+        val_var = tk.StringVar()
+        val_entry = ttk.Entry(frame, textvariable=val_var, width=30)
+        val_entry.pack(side=tk.LEFT, padx=5)
+
+        # Show unique button
+        def show_unique():
+            col = col_var.get()
+            if col and col in self.agg_loaded_df.columns:
+                unique_vals = self.agg_loaded_df[col].dropna().unique()
+                msg = f"Unique values in '{col}' ({len(unique_vals)} total):\n\n"
+                msg += ", ".join(str(v) for v in sorted(unique_vals)[:50])
+                if len(unique_vals) > 50:
+                    msg += f"\n\n... and {len(unique_vals) - 50} more"
+                messagebox.showinfo(f"Unique Values: {col}", msg)
+
+        ttk.Button(frame, text="Show Unique", command=show_unique).pack(side=tk.LEFT, padx=2)
+
+        # Remove button
+        def remove():
+            frame.destroy()
+            self.agg_filters.remove(filter_dict)
+
+        ttk.Button(frame, text="Remove", command=remove).pack(side=tk.LEFT, padx=2)
+
+        filter_dict = {
+            "frame": frame,
+            "column_var": col_var,
+            "value_var": val_var,
+            "column_combo": col_combo
+        }
+        self.agg_filters.append(filter_dict)
+
+    def run_aggregate_facilities(self):
+        """Run the aggregation."""
+        input_file = self.agg_input_var.get()
+        output_file = self.agg_output_var.get()
+
+        if not input_file or not Path(input_file).exists():
+            messagebox.showerror("Error", f"Input file not found: {input_file}")
+            return
+
+        if not output_file:
+            messagebox.showerror("Error", "Please specify an output file")
+            return
+
+        # Get selected group by columns
+        groupby_cols = [col for col, var in self.agg_groupby_vars.items() if var.get()]
+        if not groupby_cols:
+            messagebox.showerror("Error", "Please select at least one column to group by")
+            return
+
+        agg_col = self.agg_column_var.get()
+        if not agg_col:
+            messagebox.showerror("Error", "Please select an aggregation column")
+            return
+
+        # Get name order if specified
+        name_order_str = self.agg_name_order_var.get().strip()
+        name_order = None
+        if name_order_str:
+            name_order = [col.strip() for col in name_order_str.split(",")]
+            # Validate name_order columns are in groupby_cols
+            invalid = [col for col in name_order if col not in groupby_cols]
+            if invalid:
+                messagebox.showerror("Error", f"Name order contains columns not in group-by: {invalid}")
+                return
+
+        self.status_var.set("Aggregating data...")
+        self.log("\n" + "="*60)
+        self.log("AGGREGATE FACILITIES")
+        self.log("="*60)
+
+        def task():
+            try:
+                from aggregate_facilities import (
+                    read_input_file, apply_filters, aggregate_facilities, save_output_file
+                )
+                sys.stdout = RedirectText(self.console)
+                sys.stderr = RedirectText(self.console)
+
+                # Read file
+                df = read_input_file(Path(input_file))
+                self.log(f"Loaded {len(df)} rows")
+
+                # Apply filters
+                filters = {}
+                for f in self.agg_filters:
+                    col = f["column_var"].get()
+                    vals_str = f["value_var"].get().strip()
+                    if col and vals_str:
+                        vals = [v.strip() for v in vals_str.split(",")]
+                        filters[col] = vals
+
+                if filters:
+                    self.log(f"Applying filters: {filters}")
+                    df = apply_filters(df, filters)
+                    self.log(f"After filtering: {len(df)} rows")
+
+                if df.empty:
+                    self.log("✗ No data remains after filtering")
+                    self.status_var.set("Aggregation failed: no data")
+                    return
+
+                # Aggregate
+                self.log(f"Grouping by: {groupby_cols}")
+                if name_order:
+                    self.log(f"Name order: {name_order}")
+                self.log(f"Aggregating: {agg_col} (sum)")
+
+                result = aggregate_facilities(df, groupby_cols, agg_col, name_order)
+
+                # Save
+                save_output_file(result, Path(output_file))
+                self.log(f"\n✓ Aggregation complete!")
+                self.log(f"  Output: {output_file}")
+                self.log(f"  Rows: {len(result)}")
+                self.log("\nPreview (first 10 rows):")
+                self.log(str(result.head(10)))
+
+                self.status_var.set("Aggregation completed")
+                messagebox.showinfo("Success", f"Aggregation complete!\n{len(result)} rows saved to:\n{output_file}")
+
+            except Exception as e:
+                self.log(f"\n✗ Error: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.status_var.set("Aggregation failed")
+                messagebox.showerror("Error", f"Aggregation failed:\n{e}")
+            finally:
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
+
+        self.run_in_thread(task)
 
 
 def main():
