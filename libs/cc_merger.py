@@ -105,6 +105,13 @@ def merge_cc_generators(network, config=None):
         # Add merged generator - separate standard and custom attrs
         merged_name = f"{group_name}_CC"
         std_attrs = {k: v for k, v in merged_attrs.items() if k in standard_attrs and pd.notna(v)}
+
+        # Convert time-based parameters to integers (required by PyPSA)
+        integer_attrs = ['min_up_time', 'min_down_time', 'up_time_before', 'down_time_before']
+        for attr in integer_attrs:
+            if attr in std_attrs:
+                std_attrs[attr] = int(std_attrs[attr])
+
         network.add("Generator", merged_name, **std_attrs)
 
         # Add custom attributes directly to DataFrame

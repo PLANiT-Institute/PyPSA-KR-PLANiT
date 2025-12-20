@@ -5,6 +5,8 @@ This module handles setting operational parameters and characteristics
 for different component types based on their carrier.
 """
 
+import pandas as pd
+
 
 def apply_generator_attributes(network, generator_attributes):
     """
@@ -38,6 +40,9 @@ def apply_generator_attributes(network, generator_attributes):
 
     print(f"[info] Applying carrier-specific generator attributes...")
 
+    # Attributes that must be integers (time-based parameters)
+    integer_attrs = ['min_up_time', 'min_down_time', 'up_time_before', 'down_time_before']
+
     # Step 1: Apply default values to ALL generators (if 'default' exists)
     if 'default' in generator_attributes:
         default_attrs = generator_attributes['default']
@@ -47,6 +52,9 @@ def apply_generator_attributes(network, generator_attributes):
             if attr == 'p_max_pu' and hasattr(network.generators_t, 'p_max_pu') and not network.generators_t.p_max_pu.empty:
                 print(f"  - {attr}: skipped (time-series exists)")
                 continue
+            # Convert to int for time-based parameters
+            if attr in integer_attrs and value is not None and not pd.isna(value):
+                value = int(value)
             network.generators[attr] = value
             print(f"  - {attr} = {value}")
 
@@ -70,6 +78,9 @@ def apply_generator_attributes(network, generator_attributes):
             if attr == 'p_max_pu' and hasattr(network.generators_t, 'p_max_pu') and not network.generators_t.p_max_pu.empty:
                 print(f"  - {attr}: skipped (time-series exists)")
                 continue
+            # Convert to int for time-based parameters
+            if attr in integer_attrs and value is not None and not pd.isna(value):
+                value = int(value)
             # Apply the attribute to all generators of this carrier
             network.generators.loc[carrier_gens, attr] = value
             print(f"  - {attr} = {value}")
