@@ -1,10 +1,10 @@
-# PyPSA Alternative
+# PyPSA KR by PLANiT
 
 A comprehensive power system analysis toolkit for modeling and optimizing electricity networks. This project provides utilities for geocoding, network data processing, and multi-node power system analysis using PyPSA (Python for Power System Analysis).
 
 ## Overview
 
-PyPSA Alternative is designed for energy system modeling and analysis, with a focus on:
+PyPSA KR by PLANiT is designed for energy system modeling and analysis, with a focus on:
 - Multi-node network modeling (single node, province level, and grouped regions)
 - Integration with PyPSA-Earth for OpenStreetMap-based network data
 - Time-series energy system optimization
