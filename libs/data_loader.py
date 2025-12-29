@@ -4,6 +4,7 @@ Data loading functions for PyPSA networks and monthly cost data.
 import pypsa
 import pandas as pd
 from pathlib import Path
+from libs.leapyear_handler import adjust_year_with_leap_handling
 
 
 def load_network(config):
@@ -65,6 +66,35 @@ def load_network(config):
         network.snapshots = pd.to_datetime(network.snapshots, dayfirst=True)
         print(f"[info] Converted snapshots to DatetimeIndex with day-first format")
 
+    # Step 3: Apply leap year handling (handler decides if needed)
+    base_year = config.get('Base_year', {}).get('year')
+    target_year = config.get('modelling_setting', {}).get('target_year')
+
+    # Adjust network snapshots
+    snapshot_df = pd.DataFrame(index=network.snapshots)
+    snapshot_df = adjust_year_with_leap_handling(snapshot_df, base_year, target_year, datetime_col=None)
+    network.snapshots = snapshot_df.index
+
+    # Adjust all time-series component data
+    for attr in dir(network):
+        if not attr.endswith('_t'):
+            continue
+        component_t = getattr(network, attr)
+        if component_t is None:
+            continue
+
+        for ts_attr in dir(component_t):
+            if ts_attr.startswith('_'):
+                continue
+            df = getattr(component_t, ts_attr)
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                # Adjust the datetime index
+                adjusted_df = adjust_year_with_leap_handling(df, base_year, target_year, datetime_col=None)
+                setattr(component_t, ts_attr, adjusted_df)
+
+    if base_year and target_year and base_year != target_year:
+        print(f"[info] Temporal data adjusted from year {base_year} to {target_year}")
+
     print(f"Network loaded from {data_path}")
     return network
 
@@ -72,6 +102,7 @@ def load_network(config):
 def load_monthly_data(config):
     """
     Load monthly data from CSV and parse dates.
+    Changes year from base_year to target_year (no leap year handling needed for monthly data).
 
     Parameters:
     -----------
@@ -88,12 +119,24 @@ def load_monthly_data(config):
     # Parse snapshot column as datetime (dayfirst format)
     df['snapshot'] = pd.to_datetime(df['snapshot'], dayfirst=True)
 
+    # Filter for base_year data and change to target_year
+    base_year = config.get('Base_year', {}).get('year')
+    target_year = config.get('modelling_setting', {}).get('target_year')
+
+    if base_year and target_year:
+        # Keep only base_year data
+        df = df[df['snapshot'].dt.year == base_year].copy()
+        # Change year to target_year
+        if base_year != target_year:
+            df['snapshot'] = df['snapshot'].apply(lambda x: x.replace(year=target_year))
+
     return df
 
 
 def load_snapshot_data(config):
     """
     Load snapshot-level data from CSV and parse dates.
+    Adjusts year from base_year to target_year if they differ.
 
     Parameters:
     -----------
@@ -109,5 +152,16 @@ def load_snapshot_data(config):
 
     # Parse snapshot column as datetime (dayfirst format)
     df['snapshot'] = pd.to_datetime(df['snapshot'], dayfirst=True)
+
+    # Filter for base_year data and apply leap year handling
+    base_year = config.get('Base_year', {}).get('year')
+    target_year = config.get('modelling_setting', {}).get('target_year')
+
+    if base_year and target_year:
+        # Keep only base_year data
+        df = df[df['snapshot'].dt.year == base_year].copy()
+
+    # Change year with leap year handling
+    df = adjust_year_with_leap_handling(df, base_year, target_year, datetime_col='snapshot')
 
     return df

@@ -70,6 +70,12 @@ def merge_cc_generators(network, config=None):
     for group_name in unique_groups:
         group_mask = network.generators['cc_group'] == group_name
         gen_names = network.generators.index[group_mask].tolist()
+
+        # Skip if only one generator in the group (nothing to merge)
+        if len(gen_names) <= 1:
+            print(f"[info] Skipping '{group_name}' - only 1 generator, nothing to merge")
+            continue
+
         group_data = network.generators.loc[gen_names]
 
         # Find generator with largest p_nom (for 'p_nom' rule)
@@ -98,12 +104,18 @@ def merge_cc_generators(network, config=None):
                 # Unknown rule, use from largest generator
                 merged_attrs[col] = group_data.loc[largest_gen_idx, col]
 
+        # Create unique merged name
+        merged_name = f"{group_name}_CC"
+        counter = 1
+        while merged_name in network.generators.index:
+            merged_name = f"{group_name}_CC_{counter}"
+            counter += 1
+
         # Remove all old generators
         for gen_name in gen_names:
             network.remove("Generator", gen_name)
 
         # Add merged generator - separate standard and custom attrs
-        merged_name = f"{group_name}_CC"
         std_attrs = {k: v for k, v in merged_attrs.items() if k in standard_attrs and pd.notna(v)}
 
         # Convert time-based parameters to integers (required by PyPSA)
