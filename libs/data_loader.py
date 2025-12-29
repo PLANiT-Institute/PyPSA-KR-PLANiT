@@ -5,6 +5,7 @@ import pypsa
 import pandas as pd
 from pathlib import Path
 from libs.leapyear_handler import adjust_year_with_leap_handling
+from libs.load_scaler import scale_loads_to_target
 
 
 def load_network(config):
@@ -70,12 +71,8 @@ def load_network(config):
     base_year = config.get('Base_year', {}).get('year')
     target_year = config.get('modelling_setting', {}).get('target_year')
 
-    # Adjust network snapshots
-    snapshot_df = pd.DataFrame(index=network.snapshots)
-    snapshot_df = adjust_year_with_leap_handling(snapshot_df, base_year, target_year, datetime_col=None)
-    network.snapshots = snapshot_df.index
-
-    # Adjust all time-series component data
+    # IMPORTANT: Adjust all time-series component data FIRST, before changing network.snapshots
+    # If we change network.snapshots first, PyPSA will reindex time-series data and clear them!
     for attr in dir(network):
         if not attr.endswith('_t'):
             continue
@@ -92,8 +89,18 @@ def load_network(config):
                 adjusted_df = adjust_year_with_leap_handling(df, base_year, target_year, datetime_col=None)
                 setattr(component_t, ts_attr, adjusted_df)
 
+    # NOW adjust network snapshots to match
+    snapshot_df = pd.DataFrame(index=network.snapshots)
+    snapshot_df = adjust_year_with_leap_handling(snapshot_df, base_year, target_year, datetime_col=None)
+    network.snapshots = snapshot_df.index
+
     if base_year and target_year and base_year != target_year:
         print(f"[info] Temporal data adjusted from year {base_year} to {target_year}")
+
+    # Step 4: Scale loads to target total load (only if target_load is specified)
+    target_load = config.get('modelling_setting', {}).get('target_load')
+    if target_load:
+        network = scale_loads_to_target(network, target_load)
 
     print(f"Network loaded from {data_path}")
     return network
