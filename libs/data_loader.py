@@ -67,9 +67,41 @@ def load_network(config):
         network.snapshots = pd.to_datetime(network.snapshots, dayfirst=True)
         print(f"[info] Converted snapshots to DatetimeIndex with day-first format")
 
-    # Step 3: Apply leap year handling (handler decides if needed)
+    # Step 2.5: Filter ALL components for target_year (build_year <= target_year < close_year)
     base_year = config.get('Base_year', {}).get('year')
     target_year = config.get('modelling_setting', {}).get('target_year')
+
+    if base_year and target_year:
+        # PyPSA component types that might have build_year/close_year
+        component_types = [
+            'generators', 'storage_units', 'stores', 'loads', 'lines', 'links',
+            'transformers', 'buses', 'shunt_impedances', 'carriers'
+        ]
+
+        for comp_type in component_types:
+            if not hasattr(network, comp_type):
+                continue
+
+            component = getattr(network, comp_type)
+            if component.empty or 'build_year' not in component.columns:
+                continue
+
+            # Keep components built by target_year
+            keep_mask = component['build_year'] <= target_year
+
+            # AND still operating (close_year > target_year OR close_year is NaN)
+            if 'close_year' in component.columns:
+                keep_mask = keep_mask & ((component['close_year'] > target_year) | component['close_year'].isna())
+
+            # Remove components that don't meet criteria
+            items_to_remove = component.index[~keep_mask].tolist()
+            if items_to_remove:
+                comp_name_singular = comp_type.rstrip('s').capitalize() if comp_type.endswith('s') else comp_type.capitalize()
+                for item in items_to_remove:
+                    network.remove(comp_name_singular, item)
+                print(f"[info] Filtered {comp_type} for year {target_year}: kept {keep_mask.sum()}, removed {len(items_to_remove)}")
+
+    # Step 3: Apply leap year handling (handler decides if needed)
 
     # IMPORTANT: Adjust all time-series component data FIRST, before changing network.snapshots
     # If we change network.snapshots first, PyPSA will reindex time-series data and clear them!
